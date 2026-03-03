@@ -9,9 +9,43 @@ from app.models.event_models import Request, Event, EventType
 class SimulationEngine:
     def __init__(self, state: SystemState):
         self.state = state
-        self.event_log = []
+        # Always use the state's event_log for consistency
+        self.event_log = state.event_log
         if state.seed is not None:
             random.seed(state.seed)
+    def run_auto(self, steps: int = 1):
+        """
+        Runs the simulation for N steps, logging each step.
+        """
+        for _ in range(steps):
+            self.step()
+            self.log_event(EventType.RELEASE, None, [0]*len(self.state.available), details={"action": "auto_step_marker"})
+
+    def replay(self, event_log: list):
+        """
+        Replay the scenario from a given event log (deterministic replay).
+        """
+        # Reset state to initial (assume initial state is stored or reconstructable)
+        # For now, just clear allocations and available, then replay events
+        for proc in self.state.processes:
+            proc.allocation = [0]*len(proc.allocation)
+            proc.need = proc.max_demand[:]
+        self.state.available = self.state.total_resources[:]
+        self.state.request_queue.clear()
+        self.event_log.clear()
+        for event in event_log:
+            if event.type == EventType.REQUEST:
+                self.submit_request(event.process_id, event.resource_vector)
+            elif event.type == EventType.GRANT:
+                self.grant_request(event.process_id)
+            elif event.type == EventType.WAIT:
+                self.deny_request(event.process_id)
+            elif event.type == EventType.RELEASE:
+                self.release_resources(event.process_id)
+            elif event.type == EventType.DEADLOCK:
+                # Deadlock events are informational
+                self.log_event(EventType.DEADLOCK, event.process_id, event.resource_vector, details=event.details)
+
 
     def submit_request(self, pid: str, request_vector: List[int]):
         req = Request(process_id=pid, resource_vector=request_vector)
@@ -65,17 +99,19 @@ class SimulationEngine:
         return self.state
 
     def get_event_log(self) -> List[Event]:
-        return self.event_log
+        # Always return the state's event_log for consistency
+        return self.state.event_log
 
     def log_event(self, event_type: EventType, pid: Optional[str], resource_vector: List[int], details=None):
         import time
         event = Event(
-            event_id=f"evt_{len(self.event_log)+1}",
+            event_id=f"evt_{len(self.state.event_log)+1}",
             timestamp=time.time(),
             type=event_type,
             process_id=pid or "-",
             resource_vector=resource_vector,
             details=details or {}
         )
-        self.event_log.append(event)
         self.state.event_log.append(event)
+        # Keep self.event_log always in sync
+        self.event_log = self.state.event_log

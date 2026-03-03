@@ -1,13 +1,13 @@
 """
 Tests for simulation engine step correctness.
 """
-from app.models.system_models import SystemState, ProcessState
+from app.models.system_models import SystemState, ProcessState, ProcessStatus
 from app.models.event_models import Request
 from app.core.simulation_engine import SimulationEngine
 
 def test_simulation_step_grant():
     state = SystemState(
-        processes=[ProcessState(pid="P1", allocation=[0], max_demand=[3], need=[3], status="RUNNING")],
+        processes=[ProcessState(pid="P1", allocation=[0], max_demand=[3], need=[3], status=ProcessStatus.RUNNING)],
         total_resources=[3],
         available=[3],
         allocation_matrix=[[0]],
@@ -26,7 +26,7 @@ def test_simulation_step_grant():
 
 def test_simulation_step_deny():
     state = SystemState(
-        processes=[ProcessState(pid="P1", allocation=[0], max_demand=[3], need=[3], status="RUNNING")],
+        processes=[ProcessState(pid="P1", allocation=[0], max_demand=[3], need=[3], status=ProcessStatus.RUNNING)],
         total_resources=[3],
         available=[1],
         allocation_matrix=[[0]],

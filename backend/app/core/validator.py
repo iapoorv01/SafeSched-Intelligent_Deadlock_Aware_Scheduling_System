@@ -31,6 +31,18 @@ def validate_scenario(state: SystemState) -> None:
     for i, proc in enumerate(state.processes):
         if any(a > m for a, m in zip(proc.allocation, proc.max_demand)):
             raise ScenarioValidationError(f"Process {proc.pid}: allocation exceeds max_demand.")
+    # Check allocation ≤ total_resources (per process)
+    for i, proc in enumerate(state.processes):
+        if any(a > t for a, t in zip(proc.allocation, state.total_resources)):
+            raise ScenarioValidationError(f"Process {proc.pid}: allocation exceeds total_resources.")
+    # Check max_demand ≤ total_resources (per process)
+    for i, proc in enumerate(state.processes):
+        if any(m > t for m, t in zip(proc.max_demand, state.total_resources)):
+            raise ScenarioValidationError(f"Process {proc.pid}: max_demand exceeds total_resources.")
+    # Check for duplicate process IDs
+    pids = [proc.pid for proc in state.processes]
+    if len(pids) != len(set(pids)):
+        raise ScenarioValidationError("Duplicate process IDs detected.")
     # Check sum(allocation) + available == total_resources
     resource_count = len(state.total_resources)
     total_alloc = [0] * resource_count
@@ -49,6 +61,10 @@ def validate_scenario(state: SystemState) -> None:
         raise ScenarioValidationError("max_matrix dimensions mismatch.")
     if not (len(state.need_matrix) == n_proc and all(len(row) == n_res for row in state.need_matrix)):
         raise ScenarioValidationError("need_matrix dimensions mismatch.")
+    # Check request vector length matches resource count
+    for req in state.request_queue:
+        if len(req.resource_vector) != n_res:
+            raise ScenarioValidationError(f"Request vector length mismatch for process {req.process_id}.")
     # available ≥ 0
     if any(a < 0 for a in state.available):
         raise ScenarioValidationError("Negative available resources.")

@@ -1,13 +1,13 @@
 """
 Tests for Banker's Algorithm.
 """
-from app.models.system_models import SystemState, ProcessState
+from app.models.system_models import SystemState, ProcessState, ProcessStatus
 from app.core.banker import banker_safety_check
 
 def test_banker_safe_case():
     state = SystemState(
-        processes=[ProcessState(pid="P1", allocation=[1], max_demand=[3], need=[2], status="RUNNING"),
-                   ProcessState(pid="P2", allocation=[1], max_demand=[2], need=[1], status="RUNNING")],
+        processes=[ProcessState(pid="P1", allocation=[1], max_demand=[3], need=[2], status=ProcessStatus.RUNNING),
+                   ProcessState(pid="P2", allocation=[1], max_demand=[2], need=[1], status=ProcessStatus.RUNNING)],
         total_resources=[4],
         available=[2],
         allocation_matrix=[[1],[1]],
@@ -23,8 +23,8 @@ def test_banker_safe_case():
 
 def test_banker_unsafe_case():
     state = SystemState(
-        processes=[ProcessState(pid="P1", allocation=[2], max_demand=[3], need=[1], status="RUNNING"),
-                   ProcessState(pid="P2", allocation=[2], max_demand=[2], need=[0], status="RUNNING")],
+        processes=[ProcessState(pid="P1", allocation=[2], max_demand=[3], need=[1], status=ProcessStatus.RUNNING),
+                   ProcessState(pid="P2", allocation=[2], max_demand=[2], need=[0], status=ProcessStatus.RUNNING)],
         total_resources=[4],
         available=[0],
         allocation_matrix=[[2],[2]],

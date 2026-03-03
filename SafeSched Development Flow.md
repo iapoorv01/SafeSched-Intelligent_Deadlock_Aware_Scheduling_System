@@ -76,10 +76,10 @@ If this is strong, the product becomes strong.
 Required objects:
 •	SystemState [DONE]
 •	ProcessState [DONE]
-•	ResourceState
+•	ResourceState [NOT DONE]
 •	Request [DONE]
 •	Event [DONE]
-•	Checkpoint
+•	Checkpoint [NOT DONE]
 ________________________________________
 2.2 Implement scenario validation (industry-style) [DONE]
 Create:
@@ -125,14 +125,14 @@ Functions:
 •	deny_request(pid) [DONE]
 •	release(pid) [DONE]
 •	step() [DONE]
-•	run_auto(steps=N)
+•	run_auto(steps=N) [DONE]
 •	get_state() [DONE]
 •	get_logs() [DONE]
 ________________________________________
 2.7 Add determinism (very important) [DONE]
 •	random seed support [DONE]
-•	scenario export/import JSON
-•	replay mode
+•	scenario export/import JSON [DONE]
+•	replay mode [DONE]
 ________________________________________
 ________________________________________
 PHASE 3 — Scheduling Intelligence Layer (Day 6–10)
@@ -312,9 +312,9 @@ PHASE 9 — Testing (Day 35–40)
 9.1 Backend tests [DONE]
 •	banker test cases [DONE]
 •	deadlock detection test cases [DONE]
-•	scheduler fairness tests
-•	recovery correctness tests
-•	rollback correctness tests
+•	scheduler fairness tests [NOT DONE]
+•	recovery correctness tests [NOT DONE]
+•	rollback correctness tests [NOT DONE]
 ________________________________________
 9.2 Frontend tests (optional)
 •	component render tests
