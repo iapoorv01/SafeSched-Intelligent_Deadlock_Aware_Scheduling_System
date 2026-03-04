@@ -6,8 +6,9 @@ from app.models.system_models import SystemState, ProcessState
 from app.core.validator import validate_scenario, ScenarioValidationError
 
 def test_valid_scenario():
+    from app.models.system_models import ProcessStatus
     state = SystemState(
-        processes=[ProcessState(pid="P1", allocation=[1], max_demand=[3], need=[2], status="RUNNING")],
+        processes=[ProcessState(pid="P1", allocation=[1], max_demand=[3], need=[2], status=ProcessStatus.RUNNING)],
         total_resources=[4],
         available=[3],
         allocation_matrix=[[1]],
@@ -20,8 +21,9 @@ def test_valid_scenario():
     validate_scenario(state)
 
 def test_invalid_negative_resources():
+    from app.models.system_models import ProcessStatus
     state = SystemState(
-        processes=[ProcessState(pid="P1", allocation=[-1], max_demand=[3], need=[4], status="RUNNING")],
+        processes=[ProcessState(pid="P1", allocation=[-1], max_demand=[3], need=[4], status=ProcessStatus.RUNNING)],
         total_resources=[4],
         available=[3],
         allocation_matrix=[[-1]],
