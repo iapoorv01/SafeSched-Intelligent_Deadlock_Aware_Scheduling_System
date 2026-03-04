@@ -10,6 +10,7 @@ class ProcessStatus(str, Enum):
     RUNNING = "RUNNING"
     WAITING = "WAITING"
     BLOCKED = "BLOCKED"
+    SUSPENDED = "SUSPENDED"
     TERMINATED = "TERMINATED"
 
 class ProcessState(BaseModel):
@@ -18,6 +19,7 @@ class ProcessState(BaseModel):
     max_demand: List[int]
     need: List[int]
     status: ProcessStatus
+    priority: int = 0
 
 
 class SystemState(BaseModel):

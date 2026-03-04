@@ -7,6 +7,7 @@ class SimulationMetrics:
         self.deadlocks = 0
         self.recoveries = 0
         self.checkpoints = 0
+
     def as_dict(self):
         return {
             "steps": self.steps,
@@ -28,29 +29,61 @@ from app.core.request_queue import RequestQueue
 from app.models.event_models import Request, Event, EventType
 
 class SimulationEngine:
+    def compute_cost(self, proc):
+        """
+        Compute recovery cost for a process based on held resources, wait time, and priority.
+        Lower cost means better candidate for preemption/termination.
+        """
+        held_resources = sum(proc.allocation)
+        # Wait time: estimate from request_queue (if any request exists for this process)
+        wait_time = 0
+        for qr in getattr(self.request_queue, '_queue', []):
+            if qr.request.process_id == proc.pid:
+                # Use the time since the request was added, if available
+                if hasattr(qr, 'timestamp') and qr.timestamp is not None:
+                    import time
+                    wait_time = int(time.time() - qr.timestamp)
+                break
+        # Priority: use attribute if present, else 0 (lower value = higher priority)
+        priority = getattr(proc, 'priority', 0)
+        # Weighted sum: held_resources + 2*wait_time + 3*priority
+        return held_resources + 2 * wait_time + 3 * priority
+
+    def select_victim(self, deadlocked_pids):
+        """
+        Select the optimal process to recover (lowest cost).
+        """
+        candidates = [p for p in self.state.processes if p.pid in deadlocked_pids]
+        if not candidates:
+            return None
+        costs = [(self.compute_cost(p), p) for p in candidates]
+        costs.sort(key=lambda x: x[0])
+        return costs[0][1].pid
+
     def hybrid_decision_policy(self, req):
-            """
-            Hybrid policy: 1) Banker's safety check, 2) risk scoring (stub), 3) policy decision.
-            Returns: 'GRANT', 'DELAY', or 'REORDER'.
-            """
-            # 1. Banker's safety check
-            temp_state = self.state.model_copy(deep=True)
-            pid = req.process_id
-            for i, val in enumerate(req.resource_vector):
-                temp_state.available[i] -= val
-                proc = next(p for p in temp_state.processes if p.pid == pid)
-                proc.allocation[i] += val
-                proc.need[i] -= val
-            safe = banker_safety_check(temp_state)["safe"]
-            # 2. Risk scoring (stub: always 0)
-            risk_score = 0
-            # 3. Policy: grant if safe, else delay
-            if safe:
-                return "GRANT"
-            elif risk_score < 5:
-                return "DELAY"
-            else:
-                return "REORDER"
+        """
+        Hybrid policy: 1) Banker's safety check, 2) risk scoring (stub), 3) policy decision.
+        Returns: 'GRANT', 'DELAY', or 'REORDER'.
+        """
+        # 1. Banker's safety check
+        temp_state = self.state.model_copy(deep=True)
+        pid = req.process_id
+        for i, val in enumerate(req.resource_vector):
+            temp_state.available[i] -= val
+            proc = next(p for p in temp_state.processes if p.pid == pid)
+            proc.allocation[i] += val
+            proc.need[i] -= val
+        safe = banker_safety_check(temp_state)["safe"]
+        # 2. Risk scoring (stub: always 0)
+        risk_score = 0
+        # 3. Policy: grant if safe, else delay
+        if safe:
+            return "GRANT"
+        elif risk_score < 5:
+            return "DELAY"
+        else:
+            return "REORDER"
+
     def __init__(self, state: SystemState, queue_config=None, plugin_hooks=None):
         self.state = state
         self.event_log = state.event_log
@@ -61,6 +94,7 @@ class SimulationEngine:
             self.request_queue.add_request(req)
         self.metrics = SimulationMetrics()
         self.plugin_hooks = plugin_hooks or {}
+
     def run_auto(self, steps: int = 1):
         """
         Runs the simulation for N steps, logging each step.
@@ -93,7 +127,6 @@ class SimulationEngine:
             elif event.type == EventType.DEADLOCK:
                 # Deadlock events are informational
                 self.log_event(EventType.DEADLOCK, event.process_id, event.resource_vector, details=event.details)
-
 
     def submit_request(self, pid: str, request_vector: List[int], priority: int = 0):
         req = Request(process_id=pid, resource_vector=request_vector)
@@ -172,16 +205,52 @@ class SimulationEngine:
 
     def recover_from_deadlock(self, deadlocked_pids):
         """
-        Cost-based recovery: terminate lowest-cost process (stub: first in list), checkpoint before recovery, rollback if needed.
+        Iterative cost-based recovery: preempt or terminate lowest-cost process, checkpoint before each recovery, repeat until system is safe.
         """
         if not deadlocked_pids:
             return
-        self.create_checkpoint(description="Pre-recovery checkpoint")
-        # Cost function stub: just pick first
-        victim = deadlocked_pids[0]
-        self.terminate_process(victim)
-        self.metrics.recoveries += 1
-        self.log_event(EventType.RELEASE, victim, [0]*len(self.state.available), details={"action": "recovery_terminate"})
+        from app.core.deadlock_detector import matrix_deadlock_detection
+        recovery_count = 0
+        while deadlocked_pids:
+            self.create_checkpoint(description=f"Pre-recovery checkpoint {recovery_count+1}")
+            victim = self.select_victim(deadlocked_pids)
+            if victim is not None:
+                # Try preemption first, then termination if not possible
+                preempted = self.preempt_process(victim)
+                if preempted:
+                    self.metrics.recoveries += 1
+                    self.log_event(EventType.RELEASE, victim, [0]*len(self.state.available), details={"action": "recovery_preempt", "cost_based": True, "iterative": True})
+                else:
+                    self.terminate_process(victim)
+                    self.metrics.recoveries += 1
+                    self.log_event(EventType.RELEASE, victim, [0]*len(self.state.available), details={"action": "recovery_terminate", "cost_based": True, "iterative": True})
+            # Re-check for deadlock after each recovery
+            deadlocked_pids = matrix_deadlock_detection(self.state)
+            recovery_count += 1
+
+    def preempt_process(self, pid):
+        """
+        Preempt resources from a process (simulate suspension, not termination).
+        Returns True if preemption was performed, False if not possible.
+        """
+        proc = next((p for p in self.state.processes if p.pid == pid), None)
+        if proc is None:
+            return False
+        # Only preempt if process is not already terminated or suspended
+        from app.models.system_models import ProcessStatus
+        if hasattr(proc, 'status') and proc.status in [ProcessStatus.TERMINATED, ProcessStatus.SUSPENDED]:
+            return False
+        # Release all resources but mark as SUSPENDED
+        released = proc.allocation[:]
+        for i, val in enumerate(released):
+            self.state.available[i] += val
+            proc.allocation[i] = 0
+            proc.need[i] = proc.max_demand[i]
+        proc.status = ProcessStatus.SUSPENDED
+        # Remove any outstanding requests
+        self.request_queue._queue = [qr for qr in self.request_queue._queue if qr.request.process_id != pid]
+        self.state.request_queue = self.request_queue.as_list()
+        return True
 
     def terminate_process(self, pid):
         proc = next((p for p in self.state.processes if p.pid == pid), None)
@@ -199,24 +268,34 @@ class SimulationEngine:
 
     def rollback_to_last_checkpoint(self):
         """
-        Rollback to last checkpoint (if any).
+        Rollback to last checkpoint (if any), with loop prevention (max_rollback).
         """
-        if not self.state.checkpoints:
-            return False
-        last_cp = self.state.checkpoints[-1]
-        # Restore system state
-        restored = SystemState(**last_cp.system_state)
-        self.state.processes = restored.processes
-        self.state.total_resources = restored.total_resources
-        self.state.available = restored.available
-        self.state.allocation_matrix = restored.allocation_matrix
-        self.state.max_matrix = restored.max_matrix
-        self.state.need_matrix = restored.need_matrix
-        self.state.request_queue = restored.request_queue
-        self.state.event_log = restored.event_log
-        return True
+        max_rollback = 5
+        rollback_count = 0
+        while self.state.checkpoints and rollback_count < max_rollback:
+            last_cp = self.state.checkpoints[-1]
+            # Restore system state
+            restored = SystemState(**last_cp.system_state)
+            self.state.processes = restored.processes
+            self.state.total_resources = restored.total_resources
+            self.state.available = restored.available
+            self.state.allocation_matrix = restored.allocation_matrix
+            self.state.max_matrix = restored.max_matrix
+            self.state.need_matrix = restored.need_matrix
+            self.state.request_queue = restored.request_queue
+            self.state.event_log = restored.event_log
+            rollback_count += 1
+            # If system is now safe, break
+            from app.core.deadlock_detector import matrix_deadlock_detection
+            if not matrix_deadlock_detection(self.state):
+                return True
+            # Otherwise, pop this checkpoint and try previous
+            self.state.checkpoints.pop()
+        return False
+
     def create_checkpoint(self, description: Optional[str] = None):
         import time
+        max_checkpoints = 10
         cp = Checkpoint(
             checkpoint_id=f"cp_{len(self.state.checkpoints or [])+1}",
             timestamp=time.time(),
@@ -227,8 +306,12 @@ class SimulationEngine:
         if self.state.checkpoints is None:
             self.state.checkpoints = []
         self.state.checkpoints.append(cp)
+        # Retain only the most recent max_checkpoints
+        if len(self.state.checkpoints) > max_checkpoints:
+            self.state.checkpoints = self.state.checkpoints[-max_checkpoints:]
         self.metrics.checkpoints += 1
         return cp
+
     def get_metrics(self):
         return self.metrics.as_dict()
 
