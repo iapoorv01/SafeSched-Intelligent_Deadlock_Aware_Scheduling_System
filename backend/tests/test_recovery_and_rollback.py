@@ -52,9 +52,22 @@ def test_rollback_loop_prevention():
         engine.create_checkpoint(description=f"cp_{i}")
     # Simulate a deadlock that cannot be resolved (no processes to preempt/terminate)
     state.processes.clear()
+    # Test default (should return False, log event)
     rolled_back = engine.rollback_to_last_checkpoint()
-    # Should not loop forever, should return False after max_rollback
     assert rolled_back is False
+    # Check that a rollback_failed event was logged
+    assert any((e.details or {}).get("action") == "rollback_failed" for e in state.event_log)
+    # Test custom policy: always pick the oldest checkpoint
+    def oldest_policy(checkpoints, engine):
+        return 0  # always pick first
+    # Add more checkpoints for this test
+    for i in range(3):
+        engine.create_checkpoint(description=f"cp_extra_{i}")
+    state.processes.clear()
+    rolled_back2 = engine.rollback_to_last_checkpoint(max_rollback=2, custom_policy=oldest_policy)
+    assert rolled_back2 is False
+    # Should not error, should log rollback_failed again
+    assert sum(1 for e in state.event_log if (e.details or {}).get("action") == "rollback_failed") >= 2
 
 def test_preemption_preferred_over_termination():
     """

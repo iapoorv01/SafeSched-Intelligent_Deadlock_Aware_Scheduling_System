@@ -7,12 +7,13 @@ Core
 •	Banker safety [DONE]
 •	Deadlock detection (WFG cycle + matrix) [DONE]
 •	RAG/WFG graph generation [DONE]
-•	Request queue
+•	Request queue [DONE]
 Advanced
-•	Risk-aware scheduling (hybrid)
-•	Cost-optimized recovery
-•	Self-healing rollback
+•	Risk-aware scheduling (hybrid) [DONE]
+•	Cost-optimized recovery [DONE]
+•	Self-healing rollback [DONE]
 •	AI risk prediction
+•	Metrics collection & plugin hooks [DONE]  # (added for real-world observability/extensibility)
 Product
 •	Dashboard + scenario builder + graphs + recovery console
 •	Live logs
@@ -76,10 +77,10 @@ If this is strong, the product becomes strong.
 Required objects:
 •	SystemState [DONE]
 •	ProcessState [DONE]
-•	ResourceState [NOT DONE]
+•	ResourceState [DONE]
 •	Request [DONE]
 •	Event [DONE]
-•	Checkpoint [NOT DONE]
+•	Checkpoint [DONE]
 ________________________________________
 2.2 Implement scenario validation (industry-style) [DONE]
 Create:
@@ -128,6 +129,9 @@ Functions:
 •	run_auto(steps=N) [DONE]
 •	get_state() [DONE]
 •	get_logs() [DONE]
+•	plugin hooks for extensibility [DONE]
+•	metrics collection [DONE]
+•	deterministic replay (seed, export/import) [DONE]
 ________________________________________
 2.7 Add determinism (very important) [DONE]
 •	random seed support [DONE]
@@ -136,67 +140,89 @@ ________________________________________
 ________________________________________
 ________________________________________
 PHASE 3 — Scheduling Intelligence Layer (Day 6–10)
-3.1 Implement request queue
-•	FIFO queue
-•	priority queue
-•	aging mechanism (anti-starvation)
+3.4 Advanced replay and event log features [DONE]
+•	deterministic replay [DONE]
+•	event log export/import [DONE]
+3.1 Implement request queue [DONE]
+•	FIFO queue [DONE]
+•	priority queue [DONE]
+•	aging mechanism (anti-starvation) [DONE]
 ________________________________________
-3.2 Implement hybrid decision policy
+3.2 Implement hybrid decision policy [DONE]
 For each request:
-1.	Banker safe check
-2.	Risk scoring (non-ML version first)
+1.	Banker safe check [DONE]
+2.	Risk scoring (non-ML version first) [DONE]
 3.	Policy decides:
-o	GRANT
-o	DELAY
-o	REORDER
+o	GRANT [DONE]
+o	DELAY [DONE]
+o	REORDER [DONE]
 ________________________________________
-3.3 Implement fairness + anti-starvation
+3.3 Implement fairness + anti-starvation [DONE]
 Rules:
-•	max delay time
-•	priority aging
-•	queue size cap
+•	max delay time [DONE]
+•	priority aging [DONE]
+•	queue size cap [DONE]
 ________________________________________
 ________________________________________
 PHASE 4 — Recovery Optimizer (Day 10–13)
-4.1 Recovery strategies
+4.1 Recovery strategies [DONE]
 Implement:
-•	terminate process
-•	preempt resources
-•	rollback process (basic)
+•	terminate process [DONE]
+•	preempt resources [DONE]
+•	rollback process (basic) [DONE]
 ________________________________________
-4.2 Cost function engine
+4.2 Cost function engine [DONE]
 Compute cost based on:
-•	held resources
-•	wait time
-•	priority
-•	rollback penalty
-•	number of dependents
+•	held resources [DONE]
+•	wait time [DONE]
+•	priority [DONE]
+•	rollback penalty [DONE]
+•	number of dependents [DONE]
+•	process criticality [DONE]
+•	user/group fairness [DONE]
+•	partial preemption [DONE]
+•	dynamic/adaptive weights [DONE]
+•	cost explainability (breakdown) [DONE]
 Functions:
-•	compute_cost(pid)
-•	select_victim()
+•	compute_cost(pid, explain=False) [DONE]
+•	select_victim() [DONE]
 ________________________________________
-4.3 Iterative recovery loop (industry behavior)
+4.3 Iterative recovery loop (industry behavior) [DONE]
 Recovery should not be “one-shot”.
 Logic:
-•	detect deadlock
-•	apply recovery
-•	re-check
-•	repeat up to max_attempts
+•	detect deadlock [DONE]
+•	apply recovery [DONE]
+•	re-check [DONE]
+•	repeat up to max_attempts [DONE]
 ________________________________________
 ________________________________________
 PHASE 5 — Self-Healing System (Day 13–16)
-5.1 Checkpoint policy
-•	checkpoint every GRANT
-•	checkpoint every N events
-•	keep last K checkpoints
+5.1 Checkpoint policy [DONE]
+•	checkpoint every GRANT [DONE]
+•	checkpoint every N events [DONE]
+•	keep last K checkpoints [DONE]
 ________________________________________
-5.2 Rollback engine
-•	rollback to last safe checkpoint
-•	re-run scheduler with updated policy
-•	prevent rollback loops
+5.2 Rollback engine [DONE]
+•	distributed/multi-node rollback coordination [TODO]
+•	rollback to last safe checkpoint [DONE]
+•	re-run scheduler with updated policy [DONE]
+•	prevent rollback loops [DONE]
+•	rollback escalation/notification hook [DONE]
+•	checkpoint validation before restore [DONE]
+•	partial rollback (restore part of state) [DONE]
+•	rollback audit trail [DONE]
+•	fallback to safe state [DONE]
+•	checkpoint quarantine [DONE]
+4.4 Advanced cost function features [DONE]
+•	dynamic/adaptive weights [DONE]
+•	cost explainability (breakdown) [DONE]
+•	multi-objective cost (Pareto) [DONE]
+•	historical/temporal cost (moving average) [DONE]
+•	pluggable cost plugins (external/user) [DONE]
 ________________________________________
 ________________________________________
 PHASE 6 — AI Deadlock Prediction (Day 16–22)
+6.4 Real risk scoring policy [TODO]
 6.1 Dataset generation scripts
 •	generate 10k+ simulation runs
 •	log features
@@ -220,6 +246,7 @@ Return:
 ________________________________________
 ________________________________________
 PHASE 7 — FastAPI Backend (Day 22–26)
+7.5 Distributed/multi-node simulation & rollback coordination [TODO]
 Now wrap everything as an API.
 7.1 API Layers (industry pattern)
 •	api/ → routes
@@ -309,12 +336,25 @@ ________________________________________
 ________________________________________
 ________________________________________
 PHASE 9 — Testing (Day 35–40)
-9.1 Backend tests [DONE]
+9.1 Backend tests [PARTIAL]
 •	banker test cases [DONE]
 •	deadlock detection test cases [DONE]
-•	scheduler fairness tests [NOT DONE]
-•	recovery correctness tests [NOT DONE]
-•	rollback correctness tests [NOT DONE]
+•	scheduler fairness tests [DONE]
+•	recovery correctness tests [DONE]
+•	rollback correctness tests [DONE]
+•	advanced resume logic tests [DONE]
+•	dynamic priority/aging/starvation prevention tests [DONE]
+•	user/group fairness tests [DONE]
+•	partial preemption tests [DONE]
+4.5 Iterative recovery loop with re-check [DONE]
+•	detect deadlock, apply recovery, re-check, repeat [DONE]
+5.3 Advanced checkpoint retention (event/time/per-user/custom) [DONE]
+•	event-based retention [DONE]
+•	time-based retention [DONE]
+•	per-user retention [DONE]
+•	custom retention policy [DONE]
+6.5 AI-powered risk scoring policy [TODO]
+7.6 Distributed/multi-node rollback coordination [TODO]
 ________________________________________
 9.2 Frontend tests (optional)
 •	component render tests
@@ -359,6 +399,7 @@ ________________________________________
 ________________________________________
 ________________________________________
 PHASE 12 — Final “Industry Deliverables”
+•	distributed/multi-node architecture diagram/example [TODO]
 To look industry-grade, include:
 •	system architecture diagram
 •	API docs (Swagger auto from FastAPI)

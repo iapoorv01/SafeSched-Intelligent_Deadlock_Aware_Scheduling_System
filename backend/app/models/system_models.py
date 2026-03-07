@@ -20,6 +20,10 @@ class ProcessState(BaseModel):
     need: List[int]
     status: ProcessStatus
     priority: int = 0
+    rollback_count: int = 0  # Number of times this process has been rolled back
+    dependents: int = 0      # Number of processes depending on this one (for future use)
+    criticality: int = 1     # 1=normal, higher=more critical
+    user: str = "default"   # User/group for fairness
 
 
 class SystemState(BaseModel):
