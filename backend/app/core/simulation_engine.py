@@ -219,7 +219,12 @@ class SimulationEngine:
         external_checkpoint_hook=None,
         rollback_escalation_hook=None,
         checkpoint_validator=None,
-        safe_state_factory=None
+        safe_state_factory=None,
+        # Distributed/multi-node extensions
+        node_manager=None,
+        cluster_manager=None,
+        message_bus=None,
+        distributed_enabled: bool = False
     ):
         self.state = state
         self.event_log = state.event_log
@@ -264,6 +269,16 @@ class SimulationEngine:
         self._quarantined_checkpoints = set()
         # --- Rollback audit trail ---
         self.rollback_audit_trail = []
+        # Distributed/multi-node
+        self.node_manager = node_manager
+        self.cluster_manager = cluster_manager
+        self.message_bus = message_bus
+        self.distributed_enabled = distributed_enabled
+        # If distributed_enabled, ensure all distributed modules are initialized
+        if self.distributed_enabled:
+            assert self.node_manager is not None, "NodeManager required for distributed mode"
+            assert self.cluster_manager is not None, "ClusterManager required for distributed mode"
+            assert self.message_bus is not None, "MessageBus required for distributed mode"
 
     def _enforce_checkpoint_retention(self):
         # Ensure checkpoints is always a list

@@ -221,8 +221,20 @@ ________________________________________
 •	pluggable cost plugins (external/user) [DONE]
 ________________________________________
 ________________________________________
+PHASE 5B — Ultra-Advanced Distributed & Enterprise Features (NEW)
+5B.1 Pluggable consensus protocols (Raft/Paxos/custom) [TODO]
+5B.2 Dynamic cluster scaling (auto-discovery, join/leave, partition healing) [TODO]
+5B.3 Fault injection/chaos engineering (network partition, node crash, message loss simulation) [TODO]
+5B.4 Formal verification hooks (model checker/formal proofs integration) [TODO]
+5B.5 Multi-tenancy & security (auth, encryption, isolation) [TODO]
+5B.6 Hybrid cloud/edge support (heterogeneous envs) [TODO]
+5B.7 Live upgrade/rolling restart (zero-downtime) [TODO]
+5B.8 Advanced observability (OpenTelemetry, dashboards, alerting) [TODO]
+5B.9 Distributed AI/ML coordination (federated learning/inference) [TODO]
+5B.10 Cross-cluster federation (multi-cluster/geo-distributed) [TODO]
+________________________________________
 PHASE 6 — AI Deadlock Prediction (Day 16–22)
-6.4 Real risk scoring policy [TODO]
+
 6.1 Dataset generation scripts
 •	generate 10k+ simulation runs
 •	log features
@@ -244,10 +256,12 @@ Return:
 •	risk (0–100)
 •	explanation metrics
 ________________________________________
+6.4 Real risk scoring policy [TODO]
+________________________________________
+6.5 AI-powered risk scoring policy [TODO]
+________________________________________
 ________________________________________
 PHASE 7 — FastAPI Backend (Day 22–26)
-7.5 Distributed/multi-node simulation & rollback coordination [TODO]
-Now wrap everything as an API.
 7.1 API Layers (industry pattern)
 •	api/ → routes
 •	services/ → business logic
@@ -285,6 +299,11 @@ ________________________________________
 •	request rate limit (optional)
 •	error codes
 •	structured logs
+________________________________________
+7.5 Distributed/multi-node simulation & rollback coordination [TODO]
+Now wrap everything as an API.
+________________________________________
+7.6 Distributed/multi-node rollback coordination [DONE]
 ________________________________________
 ________________________________________
 PHASE 8 — React Frontend (Day 26–35)
@@ -353,8 +372,7 @@ PHASE 9 — Testing (Day 35–40)
 •	time-based retention [DONE]
 •	per-user retention [DONE]
 •	custom retention policy [DONE]
-6.5 AI-powered risk scoring policy [TODO]
-7.6 Distributed/multi-node rollback coordination [TODO]
+
 ________________________________________
 9.2 Frontend tests (optional)
 •	component render tests
