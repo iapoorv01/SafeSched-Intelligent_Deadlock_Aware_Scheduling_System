@@ -2,7 +2,7 @@
 Graph builders for SafeSched (RAG + WFG).
 """
 from typing import Dict, List, Any
-from app.models.system_models import SystemState
+from backend.app.models.system_models import SystemState
 
 def build_rag(state: SystemState) -> Dict[str, Any]:
     """

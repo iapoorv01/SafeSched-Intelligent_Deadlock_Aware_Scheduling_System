@@ -2,7 +2,7 @@
 Banker's Algorithm implementation for SafeSched.
 """
 from typing import List, Dict, Any
-from app.models.system_models import SystemState, ProcessState
+from backend.app.models.system_models import SystemState, ProcessState
 
 def compute_need(state: SystemState) -> List[List[int]]:
     """
@@ -41,8 +41,8 @@ def banker_safety_check(state: SystemState) -> Dict[str, Any]:
                 finish[i] = True
                 safe_sequence.append(state.processes[i].pid)
                 found = True
-            if not found:
-                continue
+        if not found:
+            break
     safe = all(finish)
     return {
         "safe": safe,

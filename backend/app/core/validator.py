@@ -2,8 +2,8 @@
 Scenario validation logic for SafeSched.
 """
 from typing import Any
-from app.models.system_models import SystemState, ProcessState
-from app.models.event_models import Request
+from backend.app.models.system_models import SystemState, ProcessState
+from backend.app.models.event_models import Request
 
 class ScenarioValidationError(Exception):
     pass

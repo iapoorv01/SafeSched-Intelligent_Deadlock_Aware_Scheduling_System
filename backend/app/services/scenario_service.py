@@ -1,8 +1,8 @@
 """
 Scenario service for SafeSched.
 """
-from app.models.system_models import SystemState
-from app.core.validator import validate_scenario, ScenarioValidationError
+from backend.app.models.system_models import SystemState
+from backend.app.core.validator import validate_scenario, ScenarioValidationError
 
 def create_scenario(state_data: dict) -> SystemState:
     """

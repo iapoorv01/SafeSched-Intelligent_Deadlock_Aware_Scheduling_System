@@ -4,7 +4,7 @@ Advanced RequestQueue for SafeSched: supports priority, aging, anti-starvation, 
 from typing import List, Optional
 import heapq
 import time
-from app.models.event_models import Request
+from backend.app.models.event_models import Request
 
 class QueueRequest:
     def __init__(self, request: Request, priority: int = 0, timestamp: Optional[float] = None):

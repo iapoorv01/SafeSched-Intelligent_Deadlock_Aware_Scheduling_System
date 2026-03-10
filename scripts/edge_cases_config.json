@@ -1,0 +1,4 @@
+[
+  {"type": "custom_starvation", "prob": 0.02, "params": {"wait_time": 200}},
+  {"type": "custom_resource_leak", "prob": 0.01, "params": {"amount": 3}}
+]
