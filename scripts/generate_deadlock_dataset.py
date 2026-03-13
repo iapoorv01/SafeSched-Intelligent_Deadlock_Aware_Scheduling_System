@@ -104,7 +104,7 @@ def load_generator_config():
     def env_or_config(key, default):
         return type(default)(os.environ.get(key.upper(), config.get(key, default)))
     return {
-        'NUM_RUNS': env_or_config('num_runs', 5),
+        'NUM_RUNS': env_or_config('num_runs', 2),
         'MIN_PROCESSES': env_or_config('min_processes', 3),
         'MAX_PROCESSES': env_or_config('max_processes', 12),
         'MIN_RESOURCES': env_or_config('min_resources', 2),
@@ -565,6 +565,53 @@ def main(worker_id=None):
         if not is_valid:
             logger.warning(f"[worker:{worker_id}] Skipping invalid scenario (run_id={run_id}, seed={scenario_seed})", extra=extra)
             continue
+        # --- Matrix shape repair to prevent IndexError in deadlock detection ---
+        def repair_matrices(state):
+            n_proc = len(state.processes)
+            n_res = len(state.total_resources)
+            # Repair allocation_matrix
+            if not hasattr(state, 'allocation_matrix') or not isinstance(state.allocation_matrix, list):
+                state.allocation_matrix = []
+            while len(state.allocation_matrix) < n_proc:
+                state.allocation_matrix.append([0]*n_res)
+            while len(state.allocation_matrix) > n_proc:
+                state.allocation_matrix.pop()
+            for row in state.allocation_matrix:
+                while len(row) < n_res:
+                    row.append(0)
+                while len(row) > n_res:
+                    row.pop()
+            # Repair max_matrix
+            if not hasattr(state, 'max_matrix') or not isinstance(state.max_matrix, list):
+                state.max_matrix = []
+            while len(state.max_matrix) < n_proc:
+                state.max_matrix.append([0]*n_res)
+            while len(state.max_matrix) > n_proc:
+                state.max_matrix.pop()
+            for row in state.max_matrix:
+                while len(row) < n_res:
+                    row.append(0)
+                while len(row) > n_res:
+                    row.pop()
+            # Repair need_matrix
+            if not hasattr(state, 'need_matrix') or not isinstance(state.need_matrix, list):
+                state.need_matrix = []
+            while len(state.need_matrix) < n_proc:
+                state.need_matrix.append([0]*n_res)
+            while len(state.need_matrix) > n_proc:
+                state.need_matrix.pop()
+            for i, row in enumerate(state.need_matrix):
+                for j in range(n_res):
+                    # Recompute need as max - alloc if possible
+                    if i < len(state.max_matrix) and j < len(state.max_matrix[i]) and i < len(state.allocation_matrix) and j < len(state.allocation_matrix[i]):
+                        row[j] = state.max_matrix[i][j] - state.allocation_matrix[i][j]
+                    else:
+                        row[j] = 0
+                while len(row) > n_res:
+                    row.pop()
+                while len(row) < n_res:
+                    row.append(0)
+        repair_matrices(state)
         engine = SimulationEngine(state)
         workload_pattern = random.choice(WORKLOAD_PATTERNS)
         edge_case, failure_injected, dynamic_join_leave, failure_type = inject_edge_case(state, engine)
