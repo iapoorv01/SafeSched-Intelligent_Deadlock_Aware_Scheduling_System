@@ -53,5 +53,7 @@
     {"name": "failure_type", "type": "string", "description": "Failure type(s)"},
     {"name": "event_trace_hash", "type": "string", "description": "Hash of event trace"},
     {"name": "sim_time_ms", "type": "int", "description": "Simulation time in ms"}
+    ,{"name": "deadlock_recovered", "type": "bool", "description": "Deadlock was recovered (True/False)"}
+    ,{"name": "deadlock_count", "type": "int", "description": "Number of deadlock events detected"}
   ]
 }

@@ -15,8 +15,13 @@ SCRIPT_PATH = os.path.join(os.path.dirname(__file__), 'generate_deadlock_dataset
 DEFAULT_OUTPUT_DIR = os.environ.get('OUTPUT_DIR', os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'datasets')))
 PART_FILE_TEMPLATE = os.path.join(DEFAULT_OUTPUT_DIR, 'deadlock_train_part_{:04d}.parquet')
 
+
 # --- CONFIGURABLE ---
-NUM_RUNS = int(os.environ.get('NUM_RUNS', '10'))
+import json
+CONFIG_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'config', 'generator_config.json'))
+with open(CONFIG_PATH, 'r') as f:
+    config = json.load(f)
+NUM_RUNS = int(config['num_runs'])
 NUM_WORKERS = int(os.environ.get('NUM_WORKERS', max(1, multiprocessing.cpu_count() // 2)))
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s [worker:%(worker_id)s] %(message)s')
