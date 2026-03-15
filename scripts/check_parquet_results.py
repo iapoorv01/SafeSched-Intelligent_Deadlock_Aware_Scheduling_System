@@ -6,8 +6,8 @@ dataset_path = os.path.join(os.path.dirname(__file__), '..', 'datasets', 'deadlo
 
 def main():
     df = pd.read_parquet(dataset_path)
-    print("\n--- First 5 rows ---")
-    print(df.head())
+    print("\n--- All rows ---")
+    print(df)
     print("\n--- Data types ---")
     print(df.dtypes)
     print("\n--- Summary statistics (numeric columns) ---")

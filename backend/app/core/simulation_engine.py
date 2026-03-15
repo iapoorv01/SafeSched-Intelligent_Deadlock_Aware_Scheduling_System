@@ -29,6 +29,71 @@ from backend.app.core.request_queue import RequestQueue
 from backend.app.models.event_models import Request, Event, EventType
 
 class SimulationEngine:
+    def is_simulation_done(self):
+        """
+        Returns True if all processes are terminated or the request queue is empty and no process can make further progress.
+        """
+        from backend.app.models.system_models import ProcessStatus
+        # All processes terminated
+        if all(getattr(p, 'status', None) == ProcessStatus.TERMINATED for p in self.state.processes):
+            return True
+        # Request queue is empty
+        if not self.request_queue.as_list():
+            # Check if any process can still make a request (has need > 0 and not terminated)
+            for p in self.state.processes:
+                if getattr(p, 'status', None) != ProcessStatus.TERMINATED and any(getattr(p, 'need', [0])):
+                    return False
+            return True
+        return False
+    def _repair_matrices(self):
+        """
+        Ensure allocation_matrix, max_matrix, and need_matrix are consistent with the number of processes and resources.
+        """
+        state = self.state
+        n_proc = len(state.processes)
+        n_res = len(state.total_resources)
+        # Repair allocation_matrix
+        if not hasattr(state, 'allocation_matrix') or not isinstance(state.allocation_matrix, list):
+            state.allocation_matrix = []
+        while len(state.allocation_matrix) < n_proc:
+            state.allocation_matrix.append([0]*n_res)
+        while len(state.allocation_matrix) > n_proc:
+            state.allocation_matrix.pop()
+        for row in state.allocation_matrix:
+            while len(row) < n_res:
+                row.append(0)
+            while len(row) > n_res:
+                row.pop()
+        # Repair max_matrix
+        if not hasattr(state, 'max_matrix') or not isinstance(state.max_matrix, list):
+            state.max_matrix = []
+        while len(state.max_matrix) < n_proc:
+            state.max_matrix.append([0]*n_res)
+        while len(state.max_matrix) > n_proc:
+            state.max_matrix.pop()
+        for row in state.max_matrix:
+            while len(row) < n_res:
+                row.append(0)
+            while len(row) > n_res:
+                row.pop()
+        # Repair need_matrix
+        if not hasattr(state, 'need_matrix') or not isinstance(state.need_matrix, list):
+            state.need_matrix = []
+        while len(state.need_matrix) < n_proc:
+            state.need_matrix.append([0]*n_res)
+        while len(state.need_matrix) > n_proc:
+            state.need_matrix.pop()
+        for i, row in enumerate(state.need_matrix):
+            for j in range(n_res):
+                # Recompute need as max - alloc if possible
+                if i < len(state.max_matrix) and j < len(state.max_matrix[i]) and i < len(state.allocation_matrix) and j < len(state.allocation_matrix[i]):
+                    row[j] = state.max_matrix[i][j] - state.allocation_matrix[i][j]
+                else:
+                    row[j] = 0
+            while len(row) > n_res:
+                row.pop()
+            while len(row) < n_res:
+                row.append(0)
     def compute_cost(self, proc, explain: bool = False, multi_objective: bool = False):
         """
         Compute ultra-advanced recovery cost for a process.
@@ -401,6 +466,15 @@ class SimulationEngine:
                 self.log_event(EventType.DEADLOCK, event.process_id, event.resource_vector, details=event.details)
 
     def submit_request(self, pid: str, request_vector: List[int], priority: int = 0):
+        # Prevent SUSPENDED or TERMINATED processes from submitting new requests
+        from backend.app.models.system_models import ProcessStatus
+        proc = next((p for p in self.state.processes if p.pid == pid), None)
+        if proc is None:
+            return
+        if getattr(proc, 'status', None) in (ProcessStatus.SUSPENDED, ProcessStatus.TERMINATED):
+            # Optionally log or print debug info here
+            print(f"[DEBUG] submit_request: ignored for pid={pid} with status={proc.status}")
+            return
         req = Request(process_id=pid, resource_vector=request_vector)
         self.request_queue.add_request(req, priority=priority)
         self.state.request_queue = self.request_queue.as_list()
@@ -446,6 +520,8 @@ class SimulationEngine:
         print("[DEBUG] step: after request_queue.step_aging, before as_list")
         self.state.request_queue = self.request_queue.as_list()
         print("[DEBUG] step: after state.request_queue update")
+        # --- Repair matrices before deadlock detection to prevent IndexError ---
+        self._repair_matrices()
         # Hybrid scheduling: always process highest-priority eligible request using policy
         next_req = None
         max_policy_iter = 100
@@ -748,8 +824,10 @@ class SimulationEngine:
         if callable(self.rollback_escalation_hook):
             try:
                 self.rollback_escalation_hook(self, rollback_count, audit)
-            except Exception:
-                pass
+            except Exception as e:
+                # Log escalation hook errors for debugging
+                import logging
+                logging.getLogger("simulation_engine").warning(f"Rollback escalation hook failed: {e}")
         # --- Fallback to safe state if provided ---
         if callable(self.safe_state_factory):
             try:
@@ -764,8 +842,10 @@ class SimulationEngine:
                     self.state.request_queue = safe_state.request_queue
                     self.state.event_log = safe_state.event_log
                     self.log_event(EventType.RELEASE, None, [0]*len(self.state.available), details={"action": "rollback_fallback_safe_state"})
-            except Exception:
-                pass
+            except Exception as e:
+                # Log safe state fallback errors for debugging
+                import logging
+                logging.getLogger("simulation_engine").warning(f"Safe state fallback failed: {e}")
         return False
 
     def create_checkpoint(self, description: Optional[str] = None):
@@ -816,5 +896,6 @@ class SimulationEngine:
             try:
                 self.external_checkpoint_hook(self, event)
             except Exception as e:
-                # Log or ignore external hook errors
-                pass
+                # Log external checkpoint hook errors for debugging
+                import logging
+                logging.getLogger("simulation_engine").warning(f"External checkpoint hook failed: {e}")

@@ -6,7 +6,7 @@ from backend.app.models.system_models import SystemState, ProcessState
 from backend.app.models.event_models import Request
 
 class ScenarioValidationError(Exception):
-    pass
+    pass  # Custom exception for scenario validation errors
 
 def validate_scenario(state: SystemState) -> None:
     """

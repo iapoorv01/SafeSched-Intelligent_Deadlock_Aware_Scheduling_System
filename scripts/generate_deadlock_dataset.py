@@ -734,8 +734,10 @@ def main(worker_id=None):
         recovery_attempts = 0
         deadlock_procs = matrix_deadlock_detection(state)
         deadlock_occurred = bool(deadlock_procs)
+        deadlock_ever_occurred = deadlock_occurred  # Track if any deadlock ever occurred
         deadlock_count = 1 if deadlock_occurred else 0
         deadlock_recovered = False
+        deadlock_not_recovered = False
         deadlock_type = 'matrix' if deadlock_occurred else ''
         deadlock_res = []
         time_to_deadlock = event_count
@@ -761,11 +763,13 @@ def main(worker_id=None):
             deadlock_procs = matrix_deadlock_detection(state)
             if deadlock_procs:
                 deadlock_count += 1
+                deadlock_ever_occurred = True
             deadlock_occurred = bool(deadlock_procs)
         if recovery_attempts > 0:
-            deadlock_recovered = not deadlock_occurred
+            deadlock_recovered = not deadlock_occurred and deadlock_count > 0
         if deadlock_occurred and recovery_attempts >= MAX_RECOVERY_ATTEMPTS:
             print(f"[WARNING] Max deadlock recovery attempts ({MAX_RECOVERY_ATTEMPTS}) reached. Skipping further recovery.")
+            deadlock_not_recovered = True
         if custom_policy_fn:
             try:
                 scheduling_policy, policy_params = custom_policy_fn(state, run_id, scenario_seed)
@@ -836,8 +840,7 @@ def main(worker_id=None):
         }, separators=(',', ':'))
         meta_edge_case_summary = ', '.join(edge_case_list) if edge_case_list else 'none'
         features = extract_features(
-            state, run_id, scenario_seed, deadlock_count > 0, deadlock_type, deadlock_procs, deadlock_res, time_to_deadlock, event_count,
-                # Add new fields for deadlock_recovered and deadlock_count
+            state, run_id, scenario_seed, deadlock_ever_occurred, deadlock_type, deadlock_procs, deadlock_res, time_to_deadlock, event_count,
             workload_pattern, distributed, resource_types, process_types, edge_case, failure_injected, starved, blocked, dynamic_join_leave, failure_type, event_trace_hash, sim_time_ms,
             '|'.join(preemption_events) if preemption_events else '',
             '|'.join(checkpoint_recovery_events) if checkpoint_recovery_events else '',
