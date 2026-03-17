@@ -556,6 +556,7 @@ class SimulationEngine:
             self.metrics.grants += 1
             # Terminate process if all needs are zero after grant
             proc = next((p for p in self.state.processes if p.pid == next_req.process_id), None)
+            
             if proc and all(n == 0 for n in getattr(proc, 'need', [])):
                 from backend.app.models.system_models import ProcessStatus
                 proc.status = ProcessStatus.TERMINATED
