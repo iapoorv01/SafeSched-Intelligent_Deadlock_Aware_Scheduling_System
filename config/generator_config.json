@@ -1,7 +1,7 @@
 {
-  "num_runs":10,
-  "min_processes": 2,
-  "max_processes": 4,
+  "num_runs":20,
+  "min_processes": 10,
+  "max_processes": 15,
   "min_resources": 1,
   "max_resources": 3,
   "max_instances": 5

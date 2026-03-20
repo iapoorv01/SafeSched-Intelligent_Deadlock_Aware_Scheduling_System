@@ -49,6 +49,7 @@
     {"name": "failure_injected", "type": "bool", "description": "Failure injected"},
     {"name": "starved_processes", "type": "string", "description": "Starved processes"},
     {"name": "blocked_processes", "type": "string", "description": "Blocked processes"},
+    {"name": "suspended_processes", "type": "string", "description": "Suspended processes"},
     {"name": "dynamic_join_leave", "type": "bool", "description": "Dynamic join/leave occurred"},
     {"name": "failure_type", "type": "string", "description": "Failure type(s)"},
     {"name": "event_trace_hash", "type": "string", "description": "Hash of event trace"},

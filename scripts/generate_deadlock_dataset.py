@@ -152,7 +152,7 @@ FEATURES = [
     'max_waiting', 'min_waiting', 'event_count', 'deadlock',
     'deadlock_type', 'deadlock_processes', 'deadlock_resources', 'time_to_deadlock',
     'edge_case', 'failure_injected', 'starved_processes', 'blocked_processes',
-    'dynamic_join_leave', 'failure_type', 'event_trace_hash', 'sim_time_ms',
+    'suspended_processes', 'dynamic_join_leave', 'failure_type', 'event_trace_hash', 'sim_time_ms',
     'deadlock_recovered', # NEW: whether deadlock was recovered
     'deadlock_count'      # NEW: number of deadlocks detected/recovered
 ]
@@ -313,7 +313,8 @@ def inject_edge_case(state, engine):
     # Rare/extreme: all processes blocked
     if random.random() < 0.01:
         for p in state.processes:
-            p.blocked = True
+            from backend.app.models.system_models import ProcessStatus
+            p.status = ProcessStatus.BLOCKED
         edge_cases.append('all_blocked')
         failure_injected = True
         failure_types.append('all_blocked')
@@ -422,6 +423,9 @@ def extract_features(state, run_id, scenario_seed, deadlock, deadlock_type, dead
     maxes = [sum(p.max_demand) for p in state.processes]
     needs = [sum(p.need) for p in state.processes]
     waiting = [getattr(p, 'wait_time', 0) for p in state.processes]
+    # Mark suspended processes
+    from backend.app.models.system_models import ProcessStatus
+    suspended = [i for i, p in enumerate(state.processes) if getattr(p, 'status', None) == ProcessStatus.SUSPENDED]
     # Resource details: type,total,available,allocated for each resource
     resource_details = ''
     if getattr(state, 'resources', None):
@@ -512,6 +516,7 @@ def extract_features(state, run_id, scenario_seed, deadlock, deadlock_type, dead
         int(failure_injected),
         ','.join(map(str, starved)) if starved else '',
         ','.join(map(str, blocked)) if blocked else '',
+        ','.join(map(str, suspended)) if suspended else '',
         int(dynamic_join_leave),
         failure_type,
         event_trace_hash,
@@ -606,6 +611,7 @@ def main(worker_id=None):
         'failure_injected': pa.int64(),
         'starved_processes': pa.string(),
         'blocked_processes': pa.string(),
+        'suspended_processes': pa.string(),
         'dynamic_join_leave': pa.int64(),
         'failure_type': pa.string(),
         'event_trace_hash': pa.string(),
@@ -618,20 +624,23 @@ def main(worker_id=None):
     rows_buffer = []
     buffer_size = 1000  # Write every 1000 rows
 
-    for run_id in range(NUM_RUNS):
-        print(f"[INFO] Starting run {run_id+1} of {NUM_RUNS}")
+    valid_runs = 0
+    attempted_runs = 0
+    while valid_runs < NUM_RUNS:
+        print(f"[INFO] Starting run {valid_runs+1} of {NUM_RUNS}")
         scenario_seed = random.randint(0, 2**32-1)
         distributed = random.random() < 0.2
         state, resource_types, process_types = random_scenario(scenario_seed)
         is_valid, repair_log = validate_and_repair_scenario(state)
+        attempted_runs += 1
         if not is_valid:
-            logger.warning(f"[worker:{worker_id}] Skipping invalid scenario (run_id={run_id}, seed={scenario_seed})", extra=extra)
+            logger.warning(f"[worker:{worker_id}] Skipping invalid scenario (attempt={attempted_runs}, seed={scenario_seed})", extra=extra)
             continue
-        # --- Matrix shape repair to prevent IndexError in deadlock detection ---
+        run_id = valid_runs
+        valid_runs += 1
         def repair_matrices(state):
             n_proc = len(state.processes)
             n_res = len(state.total_resources)
-            # Repair allocation_matrix
             if not hasattr(state, 'allocation_matrix') or not isinstance(state.allocation_matrix, list):
                 state.allocation_matrix = []
             while len(state.allocation_matrix) < n_proc:
@@ -643,7 +652,6 @@ def main(worker_id=None):
                     row.append(0)
                 while len(row) > n_res:
                     row.pop()
-            # Repair max_matrix
             if not hasattr(state, 'max_matrix') or not isinstance(state.max_matrix, list):
                 state.max_matrix = []
             while len(state.max_matrix) < n_proc:
@@ -655,7 +663,6 @@ def main(worker_id=None):
                     row.append(0)
                 while len(row) > n_res:
                     row.pop()
-            # Repair need_matrix
             if not hasattr(state, 'need_matrix') or not isinstance(state.need_matrix, list):
                 state.need_matrix = []
             while len(state.need_matrix) < n_proc:
@@ -664,7 +671,6 @@ def main(worker_id=None):
                 state.need_matrix.pop()
             for i, row in enumerate(state.need_matrix):
                 for j in range(n_res):
-                    # Recompute need as max - alloc if possible
                     if i < len(state.max_matrix) and j < len(state.max_matrix[i]) and i < len(state.allocation_matrix) and j < len(state.allocation_matrix[i]):
                         row[j] = state.max_matrix[i][j] - state.allocation_matrix[i][j]
                     else:
@@ -707,6 +713,16 @@ def main(worker_id=None):
         num_resources = len(state.resources or state.total_resources)
         steps = random.randint(10, 30)
         step = 0
+        # --- Deadlock tracking variables ---
+        first_deadlock_time = None
+        first_deadlock_procs = None
+        first_deadlock_res = None
+        all_deadlock_events = []
+        deadlock_count = 0
+        deadlock_recovered = False
+        deadlock_type = ''
+        deadlock_resource_types = ''
+        # --- Simulation loop ---
         while step < steps and not engine.is_simulation_done():
             idx = random.randint(0, len(state.processes)-1)
             proc = state.processes[idx]
@@ -726,78 +742,74 @@ def main(worker_id=None):
             if random.random() < 0.01:
                 engine.rollback_to_last_checkpoint()
                 checkpoint_recovery_events.append(f"rollback:{event_count}")
-            event_count += 1
-            step += 1
-        from backend.app.core.deadlock_detector import matrix_deadlock_detection
-        # --- Limit deadlock recovery attempts ---
-        MAX_RECOVERY_ATTEMPTS = 3  # Lowered for faster runs
-        recovery_attempts = 0
-        deadlock_procs = matrix_deadlock_detection(state)
-        deadlock_occurred = bool(deadlock_procs)
-        deadlock_ever_occurred = deadlock_occurred  # Track if any deadlock ever occurred
-        deadlock_count = 1 if deadlock_occurred else 0
-        deadlock_recovered = False
-        deadlock_not_recovered = False
-        deadlock_type = 'matrix' if deadlock_occurred else ''
-        deadlock_res = []
-        time_to_deadlock = event_count
-        starved = [i for i, p in enumerate(state.processes) if getattr(p, 'wait_time', 0) > 50]
-        blocked = [i for i, p in enumerate(state.processes) if getattr(p, 'blocked', False)]
-        event_trace_hash = hashlib.sha256(str(event_trace).encode()).hexdigest()[:16]
-        sim_time_ms = int((time.time() - start_time) * 1000)
-        process_aging_metrics = '|'.join([f"{getattr(p, 'pid', i)}:{getattr(p, 'age', 0)}" for i, p in enumerate(state.processes)])
-        process_starvation_metrics = '|'.join([f"{getattr(p, 'pid', i)}:{getattr(p, 'wait_time', 0)}" for i, p in enumerate(state.processes)])
-        # If deadlock recovery is needed, attempt recovery using SimulationEngine
-        while deadlock_occurred and recovery_attempts < MAX_RECOVERY_ATTEMPTS:
-            recovery_attempts += 1
-            if hasattr(engine, 'recover_from_deadlock'):
-                try:
-                    engine.recover_from_deadlock(deadlock_procs)
-                except Exception as e:
-                    logger.error(f"[worker:{worker_id}] Deadlock recovery error: {e}", extra=extra)
-                    break
-            else:
-                logger.warning(f"[worker:{worker_id}] No deadlock recovery method available in SimulationEngine.", extra=extra)
-                break
-            # Re-check for deadlock after recovery attempt
+            # --- Deadlock detection and logging ---
+            from backend.app.core.deadlock_detector import matrix_deadlock_detection
             deadlock_procs = matrix_deadlock_detection(state)
             if deadlock_procs:
                 deadlock_count += 1
-                deadlock_ever_occurred = True
-            deadlock_occurred = bool(deadlock_procs)
-        if recovery_attempts > 0:
-            deadlock_recovered = not deadlock_occurred and deadlock_count > 0
-        if deadlock_occurred and recovery_attempts >= MAX_RECOVERY_ATTEMPTS:
-            print(f"[WARNING] Max deadlock recovery attempts ({MAX_RECOVERY_ATTEMPTS}) reached. Skipping further recovery.")
-            deadlock_not_recovered = True
-        if custom_policy_fn:
-            try:
-                scheduling_policy, policy_params = custom_policy_fn(state, run_id, scenario_seed)
-            except Exception as e:
-                logger.error(f"[CustomPolicy] Error: {e}", extra=extra)
-                scheduling_policy, policy_params = 'custom_policy_error', {}
-        else:
-            possible_policies = [
-                ('fifo', {}),
-                ('priority', {'priority_boost': random.choice([True, False])}),
-                ('round_robin', {'quantum': random.randint(1, 10)}),
-                ('fair_share', {'weighting': random.uniform(0.5, 2.0)}),
-                ('custom_policy', {'param': random.randint(0, 100)})
-            ]
-            scheduling_policy, policy_params = random.choice(possible_policies)
-        deadlock_detection_method = 'matrix' if deadlock_count > 0 else ''
-        deadlock_cycle_length = len(deadlock_procs) if deadlock_count > 0 else 0
-        if deadlock_count > 0 and deadlock_procs and hasattr(state, 'processes'):
-            involved_resources = set()
-            for pid in deadlock_procs:
-                proc = next((p for p in state.processes if str(getattr(p, 'pid', p)) == str(pid)), None)
-                if proc and hasattr(proc, 'allocation'):
-                    for rid, alloc in enumerate(proc.allocation):
-                        if alloc > 0:
-                            involved_resources.add(rid)
-            deadlock_resource_types = '|'.join([resource_types[rid] for rid in involved_resources if rid < len(resource_types)])
-        else:
-            deadlock_resource_types = ''
+                all_deadlock_events.append({
+                    'step': step,
+                    'event_count': event_count,
+                    'procs': list(deadlock_procs)
+                })
+                if first_deadlock_time is None:
+                    first_deadlock_time = event_count
+                    first_deadlock_procs = list(deadlock_procs)
+                    # Find involved resources
+                    involved_resources = set()
+                    for pid in deadlock_procs:
+                        proc_obj = next((p for p in state.processes if str(getattr(p, 'pid', p)) == str(pid)), None)
+                        if proc_obj and hasattr(proc_obj, 'allocation'):
+                            for rid, alloc in enumerate(proc_obj.allocation):
+                                if alloc > 0:
+                                    involved_resources.add(rid)
+                    first_deadlock_res = list(involved_resources)
+                    deadlock_type = 'matrix'
+                    if involved_resources:
+                        deadlock_resource_types = '|'.join([resource_types[rid] for rid in involved_resources if rid < len(resource_types)])
+            event_count += 1
+            step += 1
+        sim_time_ms = int((time.time() - start_time) * 1000)
+        # --- Deadlock recovery after simulation loop ---
+        recovery_attempts = 0
+        MAX_RECOVERY_ATTEMPTS = 3
+        deadlock_occurred = first_deadlock_time is not None
+        deadlock_ever_occurred = deadlock_occurred
+        deadlock_procs = first_deadlock_procs if first_deadlock_procs is not None else []
+        deadlock_res = first_deadlock_res if first_deadlock_res is not None else []
+        time_to_deadlock = first_deadlock_time if first_deadlock_time is not None else event_count
+        # Try to recover from deadlock if any
+        if deadlock_occurred:
+            from backend.app.core.deadlock_detector import matrix_deadlock_detection
+            while recovery_attempts < MAX_RECOVERY_ATTEMPTS:
+                recovery_attempts += 1
+                if hasattr(engine, 'recover_from_deadlock'):
+                    try:
+                        engine.recover_from_deadlock(deadlock_procs)
+                    except Exception as e:
+                        logger.error(f"[worker:{worker_id}] Deadlock recovery error: {e}", extra=extra)
+                        break
+                else:
+                    logger.warning(f"[worker:{worker_id}] No deadlock recovery method available in SimulationEngine.", extra=extra)
+                    break
+                # Re-check for deadlock after recovery attempt
+                deadlock_procs = matrix_deadlock_detection(state)
+                if deadlock_procs:
+                    deadlock_count += 1
+                    all_deadlock_events.append({
+                        'step': step,
+                        'event_count': event_count,
+                        'procs': list(deadlock_procs)
+                    })
+                else:
+                    deadlock_recovered = True
+                    break
+        # --- Metrics and logging after simulation ---
+        starved = [i for i, p in enumerate(state.processes) if getattr(p, 'wait_time', 0) > 50]
+        blocked = [i for i, p in enumerate(state.processes) if getattr(p, 'blocked', False)]
+        event_trace_hash = hashlib.sha256(str(event_trace).encode()).hexdigest()[:16]
+        process_aging_metrics = '|'.join([f"{getattr(p, 'pid', i)}:{getattr(p, 'age', 0)}" for i, p in enumerate(state.processes)])
+        process_starvation_metrics = '|'.join([f"{getattr(p, 'pid', i)}:{getattr(p, 'wait_time', 0)}" for i, p in enumerate(state.processes)])
         full_event_log = ''
         if hasattr(engine, 'event_log'):
             try:
@@ -822,7 +834,7 @@ def main(worker_id=None):
         coverage_metrics = {k: int(k in edge_case_list) for k in [
             'resource_leak','process_failure','starvation','process_leave','process_join','message_loss_or_partition','resource_exhaustion','all_blocked','cyclic_wait','resource_hog','priority_inversion','aging_overflow','deadlock_escalation']}
         meta_coverage_metrics = '|'.join([f"{k}:{v}" for k,v in coverage_metrics.items()])
-        determinism_hash = hashlib.sha256((str(scenario_seed)+str(event_trace)+json.dumps(policy_params,sort_keys=True)).encode()).hexdigest()[:16]
+        determinism_hash = hashlib.sha256((str(scenario_seed)+str(event_trace)+json.dumps({} if 'policy_params' not in locals() else policy_params,sort_keys=True)).encode()).hexdigest()[:16]
         config_snapshot = json.dumps({
             'run_id': run_id,
             'scenario_seed': scenario_seed,
@@ -830,17 +842,35 @@ def main(worker_id=None):
             'distributed': distributed,
             'resource_types': resource_types,
             'process_types': process_types,
-            'scheduling_policy': scheduling_policy,
-            'policy_params': policy_params,
-            'deadlock_detection_method': deadlock_detection_method,
+            'scheduling_policy': '' if 'scheduling_policy' not in locals() else scheduling_policy,
+            'policy_params': {} if 'policy_params' not in locals() else policy_params,
+            'deadlock_detection_method': 'matrix' if deadlock_count > 0 else '',
             'edge_case': edge_case,
             'failure_injected': failure_injected,
             'dynamic_join_leave': dynamic_join_leave,
             'failure_type': failure_type
         }, separators=(',', ':'))
         meta_edge_case_summary = ', '.join(edge_case_list) if edge_case_list else 'none'
+        # --- Scheduling policy assignment (after sim for determinism) ---
+        if custom_policy_fn:
+            try:
+                scheduling_policy, policy_params = custom_policy_fn(state, run_id, scenario_seed)
+            except Exception as e:
+                logger.error(f"[CustomPolicy] Error: {e}", extra=extra)
+                scheduling_policy, policy_params = 'custom_policy_error', {}
+        else:
+            possible_policies = [
+                ('fifo', {}),
+                ('priority', {'priority_boost': random.choice([True, False])}),
+                ('round_robin', {'quantum': random.randint(1, 10)}),
+                ('fair_share', {'weighting': random.uniform(0.5, 2.0)}),
+                ('custom_policy', {'param': random.randint(0, 100)})
+            ]
+            scheduling_policy, policy_params = random.choice(possible_policies)
+        deadlock_detection_method = 'matrix' if deadlock_count > 0 else ''
+        deadlock_cycle_length = len(first_deadlock_procs) if first_deadlock_procs else 0
         features = extract_features(
-            state, run_id, scenario_seed, deadlock_ever_occurred, deadlock_type, deadlock_procs, deadlock_res, time_to_deadlock, event_count,
+            state, run_id, scenario_seed, deadlock_ever_occurred, deadlock_type, first_deadlock_procs, deadlock_res, time_to_deadlock, event_count,
             workload_pattern, distributed, resource_types, process_types, edge_case, failure_injected, starved, blocked, dynamic_join_leave, failure_type, event_trace_hash, sim_time_ms,
             '|'.join(preemption_events) if preemption_events else '',
             '|'.join(checkpoint_recovery_events) if checkpoint_recovery_events else '',
@@ -869,7 +899,6 @@ def main(worker_id=None):
                 custom_logger_fn(state=state, run_id=run_id, scenario_seed=scenario_seed, features=features)
             except Exception as e:
                 logger.error(f"[CustomLogger] Error: {e}", extra=extra)
-        # Convert features to correct types for Parquet
         def convert_feature(val, col):
             t = column_types.get(col, pa.string())
             if t == pa.int64():
@@ -887,7 +916,6 @@ def main(worker_id=None):
         features_typed = [convert_feature(f, FEATURES[i]) for i, f in enumerate(features)]
         rows_buffer.append(features_typed)
         logger.info(f"Completed run_id={run_id} scenario_seed={scenario_seed} sim_time_ms={sim_time_ms}", extra=extra)
-        # Write buffer to Parquet in chunks
         if len(rows_buffer) >= buffer_size:
             df = pd.DataFrame(rows_buffer, columns=FEATURES)
             table = pa.Table.from_pandas(df, schema=schema, preserve_index=False)
