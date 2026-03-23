@@ -46,8 +46,8 @@ class DistributedDeadlockDetector:
 
     def get_waiting_for_nodes(self) -> List[str]:
         # Should return list of node_ids this node is waiting for (from local WFG)
-        # Placeholder: in real system, integrate with local simulation engine
-        return []
+        # Not implemented: must be integrated with local simulation engine's WFG
+        raise NotImplementedError("get_waiting_for_nodes must be implemented to return node dependencies.")
 
 # Usage: Instantiate DistributedDeadlockDetector per node, integrate with local WFG
 # and call initiate_probe when local deadlock suspicion arises.

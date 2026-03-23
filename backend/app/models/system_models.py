@@ -4,7 +4,7 @@ System models for SafeSched simulation engine.
 from typing import List, Optional
 from enum import Enum
 from pydantic import BaseModel, Field
-from app.models.resource_models import ResourceState, Checkpoint
+from backend.app.models.resource_models import ResourceState, Checkpoint
 
 class ProcessStatus(str, Enum):
     RUNNING = "RUNNING"
@@ -44,5 +44,5 @@ class SystemState(BaseModel):
     seed: Optional[int] = None
 
 # Fix forward references for Pydantic v2
-from app.models.event_models import Request, Event
+from backend.app.models.event_models import Request, Event
 SystemState.model_rebuild()

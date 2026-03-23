@@ -1,0 +1,15 @@
+# Deadlock Dataset Generator - Cloud/Container Requirements
+
+pandas>=2.0.0
+pyarrow>=14.0.0
+
+# For logging and CLI
+
+# (Python standard library logging is used, no extra package needed)
+
+# For cloud storage support (optional, uncomment as needed)
+# s3fs>=2023.0.0   # For AWS S3 Parquet paths
+# gcsfs>=2023.0.0  # For Google Cloud Storage Parquet paths
+
+# For Docker builds
+# (No extra requirements, but see Dockerfile for base image)

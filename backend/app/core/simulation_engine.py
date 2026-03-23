@@ -17,18 +17,83 @@ class SimulationMetrics:
             "recoveries": self.recoveries,
             "checkpoints": self.checkpoints,
         }
-from app.core.banker import banker_safety_check
+from backend.app.core.banker import banker_safety_check
 """
 Event-driven simulation engine for SafeSched.
 """
 from typing import List, Optional
 import random
-from app.models.system_models import SystemState, ProcessState
-from app.models.resource_models import ResourceState, Checkpoint
-from app.core.request_queue import RequestQueue
-from app.models.event_models import Request, Event, EventType
+from backend.app.models.system_models import SystemState, ProcessState
+from backend.app.models.resource_models import ResourceState, Checkpoint
+from backend.app.core.request_queue import RequestQueue
+from backend.app.models.event_models import Request, Event, EventType
 
 class SimulationEngine:
+    def is_simulation_done(self):
+        """
+        Returns True if all processes are terminated or the request queue is empty and no process can make further progress.
+        """
+        from backend.app.models.system_models import ProcessStatus
+        # All processes terminated
+        if all(getattr(p, 'status', None) == ProcessStatus.TERMINATED for p in self.state.processes):
+            return True
+        # Request queue is empty
+        if not self.request_queue.as_list():
+            # Check if any process can still make a request (has need > 0 and not terminated)
+            for p in self.state.processes:
+                if getattr(p, 'status', None) != ProcessStatus.TERMINATED and any(getattr(p, 'need', [0])):
+                    return False
+            return True
+        return False
+    def _repair_matrices(self):
+        """
+        Ensure allocation_matrix, max_matrix, and need_matrix are consistent with the number of processes and resources.
+        """
+        state = self.state
+        n_proc = len(state.processes)
+        n_res = len(state.total_resources)
+        # Repair allocation_matrix
+        if not hasattr(state, 'allocation_matrix') or not isinstance(state.allocation_matrix, list):
+            state.allocation_matrix = []
+        while len(state.allocation_matrix) < n_proc:
+            state.allocation_matrix.append([0]*n_res)
+        while len(state.allocation_matrix) > n_proc:
+            state.allocation_matrix.pop()
+        for row in state.allocation_matrix:
+            while len(row) < n_res:
+                row.append(0)
+            while len(row) > n_res:
+                row.pop()
+        # Repair max_matrix
+        if not hasattr(state, 'max_matrix') or not isinstance(state.max_matrix, list):
+            state.max_matrix = []
+        while len(state.max_matrix) < n_proc:
+            state.max_matrix.append([0]*n_res)
+        while len(state.max_matrix) > n_proc:
+            state.max_matrix.pop()
+        for row in state.max_matrix:
+            while len(row) < n_res:
+                row.append(0)
+            while len(row) > n_res:
+                row.pop()
+        # Repair need_matrix
+        if not hasattr(state, 'need_matrix') or not isinstance(state.need_matrix, list):
+            state.need_matrix = []
+        while len(state.need_matrix) < n_proc:
+            state.need_matrix.append([0]*n_res)
+        while len(state.need_matrix) > n_proc:
+            state.need_matrix.pop()
+        for i, row in enumerate(state.need_matrix):
+            for j in range(n_res):
+                # Recompute need as max - alloc if possible
+                if i < len(state.max_matrix) and j < len(state.max_matrix[i]) and i < len(state.allocation_matrix) and j < len(state.allocation_matrix[i]):
+                    row[j] = state.max_matrix[i][j] - state.allocation_matrix[i][j]
+                else:
+                    row[j] = 0
+            while len(row) > n_res:
+                row.pop()
+            while len(row) < n_res:
+                row.append(0)
     def compute_cost(self, proc, explain: bool = False, multi_objective: bool = False):
         """
         Compute ultra-advanced recovery cost for a process.
@@ -150,8 +215,10 @@ class SimulationEngine:
         """
         Select the optimal process to recover.
         If multi_objective=True, use Pareto optimality (minimize all cost dimensions).
+        Only consider processes that are not SUSPENDED or TERMINATED.
         """
-        candidates = [p for p in self.state.processes if p.pid in deadlocked_pids]
+        from backend.app.models.system_models import ProcessStatus
+        candidates = [p for p in self.state.processes if p.pid in deadlocked_pids and getattr(p, 'status', None) not in (ProcessStatus.TERMINATED, ProcessStatus.SUSPENDED)]
         if not candidates:
             return None
         if multi_objective:
@@ -399,6 +466,15 @@ class SimulationEngine:
                 self.log_event(EventType.DEADLOCK, event.process_id, event.resource_vector, details=event.details)
 
     def submit_request(self, pid: str, request_vector: List[int], priority: int = 0):
+        # Prevent SUSPENDED or TERMINATED processes from submitting new requests
+        from backend.app.models.system_models import ProcessStatus
+        proc = next((p for p in self.state.processes if p.pid == pid), None)
+        if proc is None:
+            return
+        if getattr(proc, 'status', None) in (ProcessStatus.SUSPENDED, ProcessStatus.TERMINATED):
+            # Optionally log or print debug info here
+            print(f"[DEBUG] submit_request: ignored for pid={pid} with status={proc.status}")
+            return
         req = Request(process_id=pid, resource_vector=request_vector)
         self.request_queue.add_request(req, priority=priority)
         self.state.request_queue = self.request_queue.as_list()
@@ -434,71 +510,138 @@ class SimulationEngine:
         self.log_event(EventType.RELEASE, pid, released, details={"action": "release_resources"})
 
     def step(self):
+        print("[DEBUG] step: begin")
         self.metrics.steps += 1
         if self.plugin_hooks.get("pre_step"):
+            print("[DEBUG] step: pre_step hook")
             self.plugin_hooks["pre_step"](self)
+        print("[DEBUG] step: before request_queue.step_aging")
         self.request_queue.step_aging()
+        print("[DEBUG] step: after request_queue.step_aging, before as_list")
         self.state.request_queue = self.request_queue.as_list()
+        print("[DEBUG] step: after state.request_queue update")
+        # --- Repair matrices before deadlock detection to prevent IndexError ---
+        self._repair_matrices()
         # Hybrid scheduling: always process highest-priority eligible request using policy
         next_req = None
         max_policy_iter = 100
+        print("[DEBUG] step: before request_queue.as_list() loop")
         for idx, req in enumerate(self.request_queue.as_list()):
             if idx > max_policy_iter:
+                print(f"[DEBUG] step: max_policy_iter break at idx={idx}")
                 break  # Prevent infinite loop
             pid = req.process_id
+            print(f"[DEBUG] step: loop idx={idx}, pid={pid}")
             can_grant = all(req.resource_vector[i] <= self.state.available[i] for i in range(len(self.state.available)))
+            print(f"[DEBUG] step: can_grant={can_grant}")
             if can_grant:
+                print(f"[DEBUG] step: before hybrid_decision_policy for pid={pid}")
                 policy = self.hybrid_decision_policy(req)
+                print(f"[DEBUG] step: after hybrid_decision_policy, policy={policy}")
                 if policy == "GRANT":
                     next_req = req
+                    print(f"[DEBUG] step: policy GRANT, breaking loop at idx={idx}")
                     break
                 elif policy == "DELAY":
+                    print(f"[DEBUG] step: policy DELAY, continuing loop at idx={idx}")
                     continue
                 elif policy == "REORDER":
+                    print(f"[DEBUG] step: policy REORDER, reordering queue for pid={pid}")
                     self.request_queue._queue = [qr for qr in self.request_queue._queue if qr.request.process_id != pid] + [qr for qr in self.request_queue._queue if qr.request.process_id == pid]
+        print(f"[DEBUG] step: after request_queue.as_list() loop, next_req={'set' if next_req else 'None'}")
         if next_req:
+            print(f"[DEBUG] step: before grant_request for pid={next_req.process_id}")
             self.grant_request(next_req.process_id)
+            print(f"[DEBUG] step: after grant_request for pid={next_req.process_id}")
             self.metrics.grants += 1
+            # Terminate process if all needs zero after grant
+            proc = next((p for p in self.state.processes if p.pid == next_req.process_id), None)
+            
+            
+            if proc and all(n == 0 for n in getattr(proc, 'need', [])):
+                from backend.app.models.system_models import ProcessStatus
+                proc.status = ProcessStatus.TERMINATED
+                print(f"[DEBUG] step: terminated pid={proc.pid} (needs satisfied)")
+            print(f"[DEBUG] step: before create_checkpoint after grant")
             self.create_checkpoint(description="Auto-checkpoint after grant")
+            print(f"[DEBUG] step: after create_checkpoint after grant")
         elif self.request_queue._queue:
+            print(f"[DEBUG] step: before deny_request for pid={self.request_queue._queue[0].request.process_id}")
             req = self.request_queue._queue[0].request
             self.deny_request(req.process_id)
+            print(f"[DEBUG] step: after deny_request for pid={req.process_id}")
             self.metrics.denials += 1
-        from app.core.deadlock_detector import matrix_deadlock_detection
+        print(f"[DEBUG] step: before matrix_deadlock_detection")
+        from backend.app.core.deadlock_detector import matrix_deadlock_detection
         deadlocked = matrix_deadlock_detection(self.state)
+        print(f"[DEBUG] step: after matrix_deadlock_detection, deadlocked={deadlocked}")
         if deadlocked:
+            print(f"[DEBUG] step: before log_event DEADLOCK and recover_from_deadlock")
             self.metrics.deadlocks += 1
             self.log_event(EventType.DEADLOCK, None, [0]*len(self.state.available), details={"deadlocked": deadlocked})
             self.recover_from_deadlock(deadlocked)
+            print(f"[DEBUG] step: after recover_from_deadlock")
         if self.plugin_hooks.get("post_step"):
+            print("[DEBUG] step: post_step hook")
             self.plugin_hooks["post_step"](self)
+        print("[DEBUG] step: end")
 
     def recover_from_deadlock(self, deadlocked_pids):
         """
         Iterative cost-based recovery: preempt or terminate lowest-cost process, checkpoint before each recovery, repeat until system is safe.
+        Adds a maximum number of recovery attempts to prevent infinite loops.
         """
         if not deadlocked_pids:
             return
-        from app.core.deadlock_detector import matrix_deadlock_detection
+        from backend.app.core.deadlock_detector import matrix_deadlock_detection
         recovery_count = 0
-        while deadlocked_pids:
+        max_recovery_attempts = 10
+        # Track preemption counts for each victim in this recovery session
+        preempt_counts = {}
+        preempt_threshold = 2  # Escalate to termination after this many preemptions
+        while deadlocked_pids and recovery_count < max_recovery_attempts:
+            print(f"[DEBUG] recover_from_deadlock: attempt {recovery_count+1}, deadlocked={deadlocked_pids}")
             self.create_checkpoint(description=f"Pre-recovery checkpoint {recovery_count+1}")
             # Enforce retention after each recovery checkpoint
             self._enforce_checkpoint_retention()
             victim = self.select_victim(deadlocked_pids)
+            print(f"[DEBUG] recover_from_deadlock: selected victim={victim}")
             if victim is not None:
-                # Try partial preemption first, then termination if not possible
-                preempted = self.preempt_process(victim)
-                if preempted:
-                    self.metrics.recoveries += 1
-                    # Event already logged in preempt_process
-                else:
+                proc = next((p for p in self.state.processes if p.pid == victim), None)
+                from backend.app.models.system_models import ProcessStatus
+                if proc is not None and getattr(proc, 'status', None) == ProcessStatus.SUSPENDED:
+                    # Already suspended, escalate to termination
                     self.terminate_process(victim)
                     self.metrics.recoveries += 1
+                    print(f"[DEBUG] recover_from_deadlock: terminated victim={victim} (was already SUSPENDED)")
                     self.log_event(EventType.RELEASE, victim, [0]*len(self.state.available), details={"action": "recovery_terminate", "cost_based": True, "iterative": True})
+                else:
+                    # Try partial preemption first, then termination if not possible
+                    preempted = self.preempt_process(victim)
+                    print(f"[DEBUG] recover_from_deadlock: preempted={preempted} for victim={victim}")
+                    if preempted:
+                        self.metrics.recoveries += 1
+                        # Track preemption count for this victim
+                        preempt_counts[victim] = preempt_counts.get(victim, 0) + 1
+                        # If preempted more than threshold, escalate to termination
+                        if preempt_counts[victim] > preempt_threshold:
+                            self.terminate_process(victim)
+                            print(f"[DEBUG] recover_from_deadlock: terminated victim={victim} after {preempt_counts[victim]} preemptions")
+                            self.log_event(EventType.RELEASE, victim, [0]*len(self.state.available), details={"action": "recovery_terminate", "cost_based": True, "iterative": True, "escalated": True, "preemptions": preempt_counts[victim]})
+                    else:
+                        self.terminate_process(victim)
+                        self.metrics.recoveries += 1
+                        print(f"[DEBUG] recover_from_deadlock: terminated victim={victim}")
+                        self.log_event(EventType.RELEASE, victim, [0]*len(self.state.available), details={"action": "recovery_terminate", "cost_based": True, "iterative": True})
+            else:
+                print(f"[DEBUG] recover_from_deadlock: no victim could be selected, breaking recovery loop.")
+                break
             # Re-check for deadlock after each recovery
             deadlocked_pids = matrix_deadlock_detection(self.state)
+            print(f"[DEBUG] recover_from_deadlock: after recovery, deadlocked={deadlocked_pids}")
             recovery_count += 1
+        if deadlocked_pids:
+            print(f"[DEBUG] recover_from_deadlock: max recovery attempts reached or deadlock unresolved. Remaining deadlocked={deadlocked_pids}")
 
     def preempt_process(self, pid):
         """
@@ -514,8 +657,8 @@ class SimulationEngine:
         proc = next((p for p in self.state.processes if p.pid == pid), None)
         if proc is None:
             return False
-        from app.models.system_models import ProcessStatus
-        if hasattr(proc, 'status') and proc.status in [ProcessStatus.TERMINATED, ProcessStatus.SUSPENDED]:
+        from backend.app.models.system_models import ProcessStatus
+        if hasattr(proc, 'status') and proc.status == ProcessStatus.TERMINATED:
             return False
         released = [0] * len(proc.allocation)
         total_released = 0
@@ -543,13 +686,11 @@ class SimulationEngine:
                 released[i] += val
                 proc.need[i] += val
                 proc.allocation[i] = 0
+        # Only set SUSPENDED if all allocations are zero
+        if sum(proc.allocation) == 0:
             proc.status = ProcessStatus.SUSPENDED
         else:
-            # If process still holds resources, keep it RUNNING, else SUSPENDED
-            if sum(proc.allocation) == 0:
-                proc.status = ProcessStatus.SUSPENDED
-            else:
-                proc.status = ProcessStatus.RUNNING
+            proc.status = ProcessStatus.RUNNING
         # Remove any outstanding requests if fully suspended
         if proc.status == ProcessStatus.SUSPENDED:
             self.request_queue._queue = [qr for qr in self.request_queue._queue if qr.request.process_id != pid]
@@ -577,11 +718,23 @@ class SimulationEngine:
                 self.state.available[i] += val
                 proc.allocation[i] = 0
                 proc.need[i] = proc.max_demand[i]
-            from app.models.system_models import ProcessStatus
+            from backend.app.models.system_models import ProcessStatus
             proc.status = ProcessStatus.TERMINATED
             # Remove any outstanding requests
             self.request_queue._queue = [qr for qr in self.request_queue._queue if qr.request.process_id != pid]
             self.state.request_queue = self.request_queue.as_list()
+            # Defensive: clear any pending needs/alloc in matrices if present
+            idx = None
+            for i, p in enumerate(self.state.processes):
+                if p.pid == pid:
+                    idx = i
+                    break
+            if idx is not None:
+                # Zero out allocation and need in matrices
+                if idx < len(self.state.allocation_matrix):
+                    self.state.allocation_matrix[idx] = [0] * len(self.state.allocation_matrix[idx])
+                if idx < len(self.state.need_matrix):
+                    self.state.need_matrix[idx] = [0] * len(self.state.need_matrix[idx])
 
     def rollback_to_last_checkpoint(self, max_rollback: int = 5, custom_policy=None, log_failure: bool = True, partial_restore: Optional[List[str]] = None):
         """
@@ -656,7 +809,7 @@ class SimulationEngine:
                 self.state.event_log = restored.event_log
             rollback_count += 1
             self._enforce_checkpoint_retention()
-            from app.core.deadlock_detector import matrix_deadlock_detection
+            from backend.app.core.deadlock_detector import matrix_deadlock_detection
             audit.append({
                 'checkpoint_id': getattr(last_cp, 'checkpoint_id', None),
                 'rollback_count': rollback_count,
@@ -679,8 +832,10 @@ class SimulationEngine:
         if callable(self.rollback_escalation_hook):
             try:
                 self.rollback_escalation_hook(self, rollback_count, audit)
-            except Exception:
-                pass
+            except Exception as e:
+                # Log escalation hook errors for debugging
+                import logging
+                logging.getLogger("simulation_engine").warning(f"Rollback escalation hook failed: {e}")
         # --- Fallback to safe state if provided ---
         if callable(self.safe_state_factory):
             try:
@@ -695,8 +850,10 @@ class SimulationEngine:
                     self.state.request_queue = safe_state.request_queue
                     self.state.event_log = safe_state.event_log
                     self.log_event(EventType.RELEASE, None, [0]*len(self.state.available), details={"action": "rollback_fallback_safe_state"})
-            except Exception:
-                pass
+            except Exception as e:
+                # Log safe state fallback errors for debugging
+                import logging
+                logging.getLogger("simulation_engine").warning(f"Safe state fallback failed: {e}")
         return False
 
     def create_checkpoint(self, description: Optional[str] = None):
@@ -747,5 +904,6 @@ class SimulationEngine:
             try:
                 self.external_checkpoint_hook(self, event)
             except Exception as e:
-                # Log or ignore external hook errors
-                pass
+                # Log external checkpoint hook errors for debugging
+                import logging
+                logging.getLogger("simulation_engine").warning(f"External checkpoint hook failed: {e}")
