@@ -8,6 +8,6 @@ build:
 
 run:
   runtime-version: 3.11
-  command: pip3 install -r requirements.txt && python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
+  command: sh -c "pip3 install -r requirements.txt && python3 -m uvicorn main:app --host 0.0.0.0 --port 8000"
   network:
     port: 8000
