@@ -123,38 +123,38 @@ MAX_RESOURCES = GENERATOR_CONFIG['MAX_RESOURCES']
 MAX_INSTANCES = GENERATOR_CONFIG['MAX_INSTANCES']
 
 FEATURES = [
-    'version', # NEW: dataset version
-    'scenario_id', # NEW: scenario hash for deduplication/replay
-    'run_id', 'scenario_seed', 'num_processes', 'num_resources', 'total_resources',
-    'workload_pattern', 'distributed', 'resource_types', 'process_types',
+    'version',
+    'scenario_id',
+    'run_id',
+    'scenario_seed',
+    'num_processes',
+    'num_resources',
+    'total_resources',
+    'workload_pattern',
+    'distributed',
+    'resource_types',
+    'process_types',
     'resource_details',
-    'preemption_events',
-    'checkpoint_recovery_events',
-    'distributed_events',
-    'allocation_release_events',
-    'process_aging_metrics',
-    'process_starvation_metrics',
     'scheduling_policy',
     'policy_params',
-    'deadlock_detection_method',
-    'deadlock_cycle_length',
-    'deadlock_resource_types',
-    'full_event_log',
-    'failure_recovery_outcomes',
-    'user_fairness_metrics',
-    'group_fairness_metrics',
     'simulation_parameters',
     'meta_coverage_metrics',
-    'meta_determinism_hash',
     'meta_config_snapshot',
     'meta_edge_case_summary',
-    'avg_allocation', 'avg_max', 'avg_need', 'avg_waiting',
-    'max_waiting', 'min_waiting', 'event_count', 'deadlock',
-    'deadlock_type', 'deadlock_processes', 'deadlock_resources', 'time_to_deadlock',
-    'edge_case', 'failure_injected', 'starved_processes', 'blocked_processes',
-    'suspended_processes', 'dynamic_join_leave', 'failure_type', 'event_trace_hash', 'sim_time_ms',
-    'deadlock_recovered', # NEW: whether deadlock was recovered
-    'deadlock_count'      # NEW: number of deadlocks detected/recovered
+    'process_aging_metrics',
+    'process_starvation_metrics',
+    'avg_waiting',
+    'max_waiting',
+    'min_waiting',
+    'event_count',
+    'edge_case',
+    'failure_injected',
+    'starved_processes',
+    'blocked_processes',
+    'suspended_processes',
+    'dynamic_join_leave',
+    'failure_type',
+    'deadlock',
 ]
 
 
@@ -417,12 +417,13 @@ def run_workload_pattern(engine, state, pattern):
 
 import hashlib
 import time
-def extract_features(state, run_id, scenario_seed, deadlock, deadlock_type, deadlock_procs, deadlock_res, time_to_deadlock, event_count, workload_pattern, distributed, resource_types, process_types, edge_case, failure_injected, starved, blocked, dynamic_join_leave, failure_type, event_trace_hash, sim_time_ms, preemption_events='', checkpoint_recovery_events='', distributed_events='', allocation_release_events='', process_aging_metrics='', process_starvation_metrics='', scheduling_policy='', policy_params='', deadlock_detection_method='', deadlock_cycle_length='', deadlock_resource_types='', full_event_log='', failure_recovery_outcomes='', user_fairness_metrics='', group_fairness_metrics='', meta_coverage_metrics='', meta_determinism_hash='', meta_config_snapshot='', meta_edge_case_summary=''):
+from copy import deepcopy
+
+def extract_features(state, run_id, scenario_seed, deadlock, event_count, workload_pattern, distributed, resource_types, process_types, edge_case, failure_injected, starved, blocked, dynamic_join_leave, failure_type, process_aging_metrics='', process_starvation_metrics='', scheduling_policy='', policy_params='', meta_coverage_metrics='', meta_config_snapshot='', meta_edge_case_summary=''):
     import json
-    allocations = [sum(p.allocation) for p in state.processes]
-    maxes = [sum(p.max_demand) for p in state.processes]
-    needs = [sum(p.need) for p in state.processes]
     waiting = [getattr(p, 'wait_time', 0) for p in state.processes]
+    if not waiting:
+        waiting = [0]
     # Mark suspended processes
     from backend.app.models.system_models import ProcessStatus
     suspended = [i for i, p in enumerate(state.processes) if getattr(p, 'status', None) == ProcessStatus.SUSPENDED]
@@ -454,14 +455,13 @@ def extract_features(state, run_id, scenario_seed, deadlock, deadlock_type, dead
         'process_types': process_types,
         'scheduling_policy': scheduling_policy,
         'policy_params': policy_params,
-        'deadlock_detection_method': deadlock_detection_method,
         'edge_case': edge_case,
         'failure_injected': failure_injected,
         'dynamic_join_leave': dynamic_join_leave,
         'failure_type': failure_type
     }, separators=(',', ':'))
     # --- Version and scenario_id ---
-    VERSION = "1.0.0"
+    VERSION = "2.0.0"
     # scenario_id: hash of scenario_seed + resource_types + process_types + total_resources + max_matrix + allocation
     scenario_id_data = str(scenario_seed) + str(resource_types) + str(process_types) + str(state.total_resources)
     if hasattr(state, 'max_matrix') and hasattr(state, 'allocation_matrix'):
@@ -480,38 +480,18 @@ def extract_features(state, run_id, scenario_seed, deadlock, deadlock_type, dead
         '|'.join(resource_types),
         '|'.join(process_types),
         resource_details,
-        preemption_events or '',
-        checkpoint_recovery_events or '',
-        distributed_events or '',
-        allocation_release_events or '',
-        process_aging_metrics or '',
-        process_starvation_metrics or '',
         scheduling_policy or '',
         policy_params or '',
-        deadlock_detection_method or '',
-        deadlock_cycle_length or '',
-        deadlock_resource_types or '',
-        full_event_log or '',
-        failure_recovery_outcomes or '',
-        user_fairness_metrics or '',
-        group_fairness_metrics or '',
         simulation_parameters,
         meta_coverage_metrics,
-        meta_determinism_hash,
         meta_config_snapshot,
         meta_edge_case_summary,
-        sum(allocations)/len(allocations),
-        sum(maxes)/len(maxes),
-        sum(needs)/len(needs),
+        process_aging_metrics or '',
+        process_starvation_metrics or '',
         sum(waiting)/len(waiting),
         max(waiting),
         min(waiting),
         event_count,
-        int(deadlock),
-        deadlock_type,
-        ','.join(map(str, deadlock_procs)) if deadlock_procs else '',
-        ','.join(map(str, deadlock_res)) if deadlock_res else '',
-        time_to_deadlock,
         edge_case or '',
         int(failure_injected),
         ','.join(map(str, starved)) if starved else '',
@@ -519,8 +499,7 @@ def extract_features(state, run_id, scenario_seed, deadlock, deadlock_type, dead
         ','.join(map(str, suspended)) if suspended else '',
         int(dynamic_join_leave),
         failure_type,
-        event_trace_hash,
-        sim_time_ms
+        int(deadlock),
     ]
 
 def load_custom_policy():
@@ -575,38 +554,18 @@ def main(worker_id=None):
         'resource_types': pa.string(),
         'process_types': pa.string(),
         'resource_details': pa.string(),
-        'preemption_events': pa.string(),
-        'checkpoint_recovery_events': pa.string(),
-        'distributed_events': pa.string(),
-        'allocation_release_events': pa.string(),
-        'process_aging_metrics': pa.string(),
-        'process_starvation_metrics': pa.string(),
         'scheduling_policy': pa.string(),
         'policy_params': pa.string(),
-        'deadlock_detection_method': pa.string(),
-        'deadlock_cycle_length': pa.int64(),
-        'deadlock_resource_types': pa.string(),
-        'full_event_log': pa.string(),
-        'failure_recovery_outcomes': pa.string(),
-        'user_fairness_metrics': pa.string(),
-        'group_fairness_metrics': pa.string(),
         'simulation_parameters': pa.string(),
         'meta_coverage_metrics': pa.string(),
-        'meta_determinism_hash': pa.string(),
         'meta_config_snapshot': pa.string(),
         'meta_edge_case_summary': pa.string(),
-        'avg_allocation': pa.float64(),
-        'avg_max': pa.float64(),
-        'avg_need': pa.float64(),
+        'process_aging_metrics': pa.string(),
+        'process_starvation_metrics': pa.string(),
         'avg_waiting': pa.float64(),
         'max_waiting': pa.float64(),
         'min_waiting': pa.float64(),
         'event_count': pa.int64(),
-        'deadlock': pa.int64(),
-        'deadlock_type': pa.string(),
-        'deadlock_processes': pa.string(),
-        'deadlock_resources': pa.string(),
-        'time_to_deadlock': pa.int64(),
         'edge_case': pa.string(),
         'failure_injected': pa.int64(),
         'starved_processes': pa.string(),
@@ -614,10 +573,7 @@ def main(worker_id=None):
         'suspended_processes': pa.string(),
         'dynamic_join_leave': pa.int64(),
         'failure_type': pa.string(),
-        'event_trace_hash': pa.string(),
-        'sim_time_ms': pa.int64(),
-        'deadlock_recovered': pa.int64(),  # Store as int64 (0/1) for compatibility
-        'deadlock_count': pa.int64(),
+        'deadlock': pa.int64(),
     }
     schema = pa.schema([(col, column_types.get(col, pa.string())) for col in FEATURES])
     table_writer = None
@@ -683,27 +639,38 @@ def main(worker_id=None):
         engine = SimulationEngine(state)
         workload_pattern = random.choice(WORKLOAD_PATTERNS)
         edge_case, failure_injected, dynamic_join_leave, failure_type = inject_edge_case(state, engine)
-        event_trace = []
-        preemption_events = []
+        def capture_state_snapshot(current_state):
+            try:
+                return deepcopy(current_state)
+            except Exception:
+                fallback_max = [list(getattr(p, 'max_demand', [])) for p in current_state.processes]
+                fallback_alloc = [list(getattr(p, 'allocation', [])) for p in current_state.processes]
+                snapshot = build_system_state(list(current_state.total_resources), fallback_max, fallback_alloc)
+                for src_proc, dst_proc in zip(current_state.processes, snapshot.processes):
+                    for attr in ('wait_time', 'status', 'priority', 'age', 'blocked'):
+                        if hasattr(src_proc, attr):
+                            setattr(dst_proc, attr, getattr(src_proc, attr))
+                return snapshot
+
+        # Scheduling policy is assigned before simulation so it remains pre-outcome metadata.
+        if custom_policy_fn:
+            try:
+                scheduling_policy, policy_params = custom_policy_fn(state, run_id, scenario_seed)
+            except Exception as e:
+                logger.error(f"[CustomPolicy] Error: {e}", extra=extra)
+                scheduling_policy, policy_params = 'custom_policy_error', {}
+        else:
+            possible_policies = [
+                ('fifo', {}),
+                ('priority', {'priority_boost': random.choice([True, False])}),
+                ('round_robin', {'quantum': random.randint(1, 10)}),
+                ('fair_share', {'weighting': random.uniform(0.5, 2.0)}),
+                ('custom_policy', {'param': random.randint(0, 100)})
+            ]
+            scheduling_policy, policy_params = random.choice(possible_policies)
+
         start_time = time.time()
         event_count = 0
-        checkpoint_recovery_events = []
-        distributed_events = []
-        allocation_release_events = []
-        if distributed:
-            for _ in range(random.randint(1, 3)):
-                if random.random() < 0.2:
-                    distributed_events.append('partition')
-                if random.random() < 0.2:
-                    distributed_events.append('message_delay')
-                if random.random() < 0.1:
-                    distributed_events.append('inter_node_deadlock')
-        def log_alloc_release_events(event_log, allocation_release_events):
-            for ev in event_log:
-                if hasattr(ev, 'event_type') and ev.event_type in ('allocate', 'release'):
-                    allocation_release_events.append(f"{ev.event_type}:{getattr(ev, 'process', getattr(ev, 'pid', ''))}:{getattr(ev, 'resource', getattr(ev, 'rid', ''))}:{getattr(ev, 'amount', 1)}")
-                elif isinstance(ev, tuple) and len(ev) >= 3 and ev[0] in ('allocate', 'release'):
-                    allocation_release_events.append(f"{ev[0]}:{ev[1]}:{ev[2]}:{ev[3] if len(ev) > 3 else 1}")
         def clamp_req_vector(req, n):
             if len(req) < n:
                 return req + [0] * (n - len(req))
@@ -722,26 +689,26 @@ def main(worker_id=None):
         deadlock_recovered = False
         deadlock_type = ''
         deadlock_resource_types = ''
+        # Pre-outcome snapshot used for feature extraction (decision-time state).
+        feature_snapshot_state = capture_state_snapshot(state)
+        feature_snapshot_event_count = 0
         # --- Simulation loop ---
         while step < steps and not engine.is_simulation_done():
+            pre_step_snapshot_state = capture_state_snapshot(state)
+            pre_step_event_count = event_count
             idx = random.randint(0, len(state.processes)-1)
             proc = state.processes[idx]
             req = [random.randint(0, max(0, proc.need[j])) for j in range(min(len(proc.need), num_resources))]
             req = clamp_req_vector(req, num_resources)
             engine.submit_request(proc.pid, req)
             engine.step()
-            event_trace.append((proc.pid, tuple(req)))
-            log_alloc_release_events(getattr(engine, 'event_log', []), allocation_release_events)
             if random.random() < 0.05:
                 preempted_pid = proc.pid
                 engine.preempt_process(preempted_pid)
-                preemption_events.append(f"preempt:{preempted_pid}:{event_count}")
             if random.random() < 0.03:
                 engine.create_checkpoint(description=f"auto_{event_count}")
-                checkpoint_recovery_events.append(f"checkpoint:{event_count}")
             if random.random() < 0.01:
                 engine.rollback_to_last_checkpoint()
-                checkpoint_recovery_events.append(f"rollback:{event_count}")
             # --- Deadlock detection and logging ---
             from backend.app.core.deadlock_detector import matrix_deadlock_detection
             deadlock_procs = matrix_deadlock_detection(state)
@@ -755,6 +722,9 @@ def main(worker_id=None):
                 if first_deadlock_time is None:
                     first_deadlock_time = event_count
                     first_deadlock_procs = list(deadlock_procs)
+                    # Capture the state immediately before the first detected deadlock.
+                    feature_snapshot_state = pre_step_snapshot_state
+                    feature_snapshot_event_count = pre_step_event_count
                     # Find involved resources
                     involved_resources = set()
                     for pid in deadlock_procs:
@@ -769,6 +739,10 @@ def main(worker_id=None):
                         deadlock_resource_types = '|'.join([resource_types[rid] for rid in involved_resources if rid < len(resource_types)])
             event_count += 1
             step += 1
+            # If there is no deadlock, keep advancing the latest pre-outcome snapshot.
+            if first_deadlock_time is None:
+                feature_snapshot_state = pre_step_snapshot_state
+                feature_snapshot_event_count = pre_step_event_count
         sim_time_ms = int((time.time() - start_time) * 1000)
         # --- Deadlock recovery after simulation loop ---
         recovery_attempts = 0
@@ -805,36 +779,14 @@ def main(worker_id=None):
                     deadlock_recovered = True
                     break
         # --- Metrics and logging after simulation ---
-        starved = [i for i, p in enumerate(state.processes) if getattr(p, 'wait_time', 0) > 50]
-        blocked = [i for i, p in enumerate(state.processes) if getattr(p, 'blocked', False)]
-        event_trace_hash = hashlib.sha256(str(event_trace).encode()).hexdigest()[:16]
-        process_aging_metrics = '|'.join([f"{getattr(p, 'pid', i)}:{getattr(p, 'age', 0)}" for i, p in enumerate(state.processes)])
-        process_starvation_metrics = '|'.join([f"{getattr(p, 'pid', i)}:{getattr(p, 'wait_time', 0)}" for i, p in enumerate(state.processes)])
-        full_event_log = ''
-        if hasattr(engine, 'event_log'):
-            try:
-                full_event_log = '|'.join([
-                    f"{getattr(ev, 'event_type', ev[0] if isinstance(ev, tuple) else 'unknown')}:{getattr(ev, 'process', getattr(ev, 'pid', ev[1] if isinstance(ev, tuple) and len(ev) > 1 else ''))}:{getattr(ev, 'resource', getattr(ev, 'rid', ev[2] if isinstance(ev, tuple) and len(ev) > 2 else ''))}:{getattr(ev, 'amount', ev[3] if isinstance(ev, tuple) and len(ev) > 3 else 1)}"
-                    if (hasattr(ev, 'event_type') or (isinstance(ev, tuple) and len(ev) >= 3)) else str(ev)
-                    for ev in getattr(engine, 'event_log', [])
-                ])
-            except Exception:
-                full_event_log = str(getattr(engine, 'event_log', []))
-        recovery_outcomes = []
-        if checkpoint_recovery_events:
-            for ev in checkpoint_recovery_events:
-                if 'rollback' in ev:
-                    recovery_outcomes.append(f"rollback:{ev}")
-                elif 'checkpoint' in ev:
-                    recovery_outcomes.append(f"checkpoint:{ev}")
-        failure_recovery_outcomes = '|'.join(recovery_outcomes)
-        user_fairness_metrics = '|'.join([f"user{i}:{random.uniform(0.7, 1.0):.2f}" for i in range(len(state.processes))])
-        group_fairness_metrics = '|'.join([f"group{g}:{random.uniform(0.7, 1.0):.2f}" for g in range(max(1, len(state.processes)//3))])
+        starved = [i for i, p in enumerate(feature_snapshot_state.processes) if getattr(p, 'wait_time', 0) > 50]
+        blocked = [i for i, p in enumerate(feature_snapshot_state.processes) if getattr(p, 'blocked', False)]
+        process_aging_metrics = '|'.join([f"{getattr(p, 'pid', i)}:{getattr(p, 'age', 0)}" for i, p in enumerate(feature_snapshot_state.processes)])
+        process_starvation_metrics = '|'.join([f"{getattr(p, 'pid', i)}:{getattr(p, 'wait_time', 0)}" for i, p in enumerate(feature_snapshot_state.processes)])
         edge_case_list = edge_case.split('|') if edge_case else []
         coverage_metrics = {k: int(k in edge_case_list) for k in [
             'resource_leak','process_failure','starvation','process_leave','process_join','message_loss_or_partition','resource_exhaustion','all_blocked','cyclic_wait','resource_hog','priority_inversion','aging_overflow','deadlock_escalation']}
         meta_coverage_metrics = '|'.join([f"{k}:{v}" for k,v in coverage_metrics.items()])
-        determinism_hash = hashlib.sha256((str(scenario_seed)+str(event_trace)+json.dumps({} if 'policy_params' not in locals() else policy_params,sort_keys=True)).encode()).hexdigest()[:16]
         config_snapshot = json.dumps({
             'run_id': run_id,
             'scenario_seed': scenario_seed,
@@ -842,58 +794,25 @@ def main(worker_id=None):
             'distributed': distributed,
             'resource_types': resource_types,
             'process_types': process_types,
-            'scheduling_policy': '' if 'scheduling_policy' not in locals() else scheduling_policy,
-            'policy_params': {} if 'policy_params' not in locals() else policy_params,
-            'deadlock_detection_method': 'matrix' if deadlock_count > 0 else '',
+            'scheduling_policy': scheduling_policy,
+            'policy_params': policy_params,
             'edge_case': edge_case,
             'failure_injected': failure_injected,
             'dynamic_join_leave': dynamic_join_leave,
             'failure_type': failure_type
         }, separators=(',', ':'))
         meta_edge_case_summary = ', '.join(edge_case_list) if edge_case_list else 'none'
-        # --- Scheduling policy assignment (after sim for determinism) ---
-        if custom_policy_fn:
-            try:
-                scheduling_policy, policy_params = custom_policy_fn(state, run_id, scenario_seed)
-            except Exception as e:
-                logger.error(f"[CustomPolicy] Error: {e}", extra=extra)
-                scheduling_policy, policy_params = 'custom_policy_error', {}
-        else:
-            possible_policies = [
-                ('fifo', {}),
-                ('priority', {'priority_boost': random.choice([True, False])}),
-                ('round_robin', {'quantum': random.randint(1, 10)}),
-                ('fair_share', {'weighting': random.uniform(0.5, 2.0)}),
-                ('custom_policy', {'param': random.randint(0, 100)})
-            ]
-            scheduling_policy, policy_params = random.choice(possible_policies)
-        deadlock_detection_method = 'matrix' if deadlock_count > 0 else ''
-        deadlock_cycle_length = len(first_deadlock_procs) if first_deadlock_procs else 0
         features = extract_features(
-            state, run_id, scenario_seed, deadlock_ever_occurred, deadlock_type, first_deadlock_procs, deadlock_res, time_to_deadlock, event_count,
-            workload_pattern, distributed, resource_types, process_types, edge_case, failure_injected, starved, blocked, dynamic_join_leave, failure_type, event_trace_hash, sim_time_ms,
-            '|'.join(preemption_events) if preemption_events else '',
-            '|'.join(checkpoint_recovery_events) if checkpoint_recovery_events else '',
-            '|'.join(distributed_events) if distributed_events else '',
-            '|'.join(allocation_release_events) if allocation_release_events else '',
+            feature_snapshot_state, run_id, scenario_seed, deadlock_ever_occurred, feature_snapshot_event_count,
+            workload_pattern, distributed, resource_types, process_types, edge_case, failure_injected, starved, blocked, dynamic_join_leave, failure_type,
             process_aging_metrics,
             process_starvation_metrics,
             scheduling_policy,
             str(policy_params),
-            deadlock_detection_method,
-            str(deadlock_cycle_length),
-            deadlock_resource_types,
-            full_event_log,
-            failure_recovery_outcomes,
-            user_fairness_metrics,
-            group_fairness_metrics,
             meta_coverage_metrics,
-            determinism_hash,
             config_snapshot,
             meta_edge_case_summary
         )
-        features.append(bool(deadlock_recovered))
-        features.append(int(deadlock_count))
         if custom_logger_fn:
             try:
                 custom_logger_fn(state=state, run_id=run_id, scenario_seed=scenario_seed, features=features)
