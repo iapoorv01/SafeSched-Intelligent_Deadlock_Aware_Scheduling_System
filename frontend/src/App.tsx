@@ -110,8 +110,9 @@ function App() {
                     <label className="block text-sm font-bold text-slate-500 mb-3 uppercase tracking-wider ml-1">Processes (P)</label>
                     <input
                       type="number"
-                      value={processes}
-                      onChange={(e) => setProcesses(Number(e.target.value))}
+                      placeholder="0"
+                      value={processes === 0 ? '' : processes}
+                      onChange={(e) => setProcesses(e.target.value === '' ? 0 : Number(e.target.value))}
                       className="skeuo-input text-xl h-16"
                     />
                     <p className="mt-2 text-xs text-slate-400 ml-1 italic">Number of active tasks in the system</p>
@@ -120,8 +121,9 @@ function App() {
                     <label className="block text-sm font-bold text-slate-500 mb-3 uppercase tracking-wider ml-1">Resources (R)</label>
                     <input
                       type="number"
-                      value={resources}
-                      onChange={(e) => setResources(Number(e.target.value))}
+                      placeholder="0"
+                      value={resources === 0 ? '' : resources}
+                      onChange={(e) => setResources(e.target.value === '' ? 0 : Number(e.target.value))}
                       className="skeuo-input text-xl h-16"
                     />
                     <p className="mt-2 text-xs text-slate-400 ml-1 italic">Different classes of system resources</p>
@@ -149,8 +151,9 @@ function App() {
                             <td key={j}>
                               <input
                                 type="number"
-                                value={val}
-                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleMatrixChange(setAllocation, allocation, i, j, Number(e.target.value))}
+                                placeholder="0"
+                                value={val === 0 ? '' : val}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleMatrixChange(setAllocation, allocation, i, j, e.target.value === '' ? 0 : Number(e.target.value))}
                                 className="skeuo-input w-20 h-14 text-center ring-inset"
                               />
                               {i === 0 && <p className="text-[10px] text-center mt-2 font-bold text-slate-400 uppercase tracking-tighter">Res {j}</p>}
@@ -177,8 +180,9 @@ function App() {
                             <td key={j}>
                               <input
                                 type="number"
-                                value={val}
-                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleMatrixChange(setMax, max, i, j, Number(e.target.value))}
+                                placeholder="0"
+                                value={val === 0 ? '' : val}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleMatrixChange(setMax, max, i, j, e.target.value === '' ? 0 : Number(e.target.value))}
                                 className="skeuo-input w-20 h-14 text-center border-2 border-transparent focus:border-blue-300"
                               />
                               {i === 0 && <p className="text-[10px] text-center mt-2 font-bold text-slate-400 uppercase tracking-tighter">Res {j}</p>}
@@ -202,8 +206,9 @@ function App() {
                         <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase group-hover:text-blue-500 transition-colors">Res {j}</label>
                         <input
                           type="number"
-                          value={val}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleAvailableChange(j, Number(e.target.value))}
+                          placeholder="0"
+                          value={val === 0 ? '' : val}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleAvailableChange(j, e.target.value === '' ? 0 : Number(e.target.value))}
                           className="skeuo-input w-full h-16 md:h-20 text-center text-xl md:text-2xl font-black text-blue-600"
                         />
                       </div>
