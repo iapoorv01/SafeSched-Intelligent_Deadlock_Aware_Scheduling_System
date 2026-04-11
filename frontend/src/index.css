@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#e0e5ec] text-slate-800 font-sans antialiased selection:bg-blue-200;
+  }
+}
+
+@layer components {
+  /* Skeuomorphic - Neumorphism Style */
+  .skeuo-flat {
+    @apply bg-[#e0e5ec] shadow-[9px_9px_16px_rgb(163,177,198,0.6),-9px_-9px_16px_rgba(255,255,255,0.5)];
+  }
+  
+  .skeuo-pressed {
+    @apply bg-[#e0e5ec] shadow-[inset_6px_6px_10px_0_rgba(0,0,0,0.1),inset_-6px_-6px_10px_0_rgba(255,255,255,0.7)];
+  }
+
+  .skeuo-button {
+    @apply skeuo-flat active:skeuo-pressed transition-all duration-200 rounded-xl px-6 py-3 font-semibold text-slate-600 hover:text-blue-600;
+  }
+
+  .skeuo-input {
+    @apply skeuo-pressed rounded-xl border-none outline-none px-4 py-2 w-full text-slate-700 focus:ring-2 focus:ring-blue-400/50 transition-all;
+  }
+
+  /* Glassmorphism overlays */
+  .glass-card {
+    @apply bg-white/40 backdrop-blur-xl border border-white/40 shadow-2xl;
+  }
+
+  /* Animation */
+  .fade-in {
+    animation: fadeIn 0.5s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-400/30 rounded-full hover:bg-slate-400/50;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
