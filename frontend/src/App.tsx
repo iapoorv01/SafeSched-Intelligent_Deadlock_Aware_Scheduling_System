@@ -16,6 +16,7 @@ function App() {
     deadlock: number; 
     confidence: number;
     logical_deadlock: number;
+    is_starvation: boolean;
     deadlocked_processes: number[];
     safe_sequence: number[];
     immediate_runnable: number;
@@ -271,11 +272,13 @@ function App() {
 
                 {result && (
                   <div className={`p-8 rounded-[2rem] text-center fade-in bg-white/40 border border-white/60 shadow-xl ${
-                    (result.deadlock || result.recommended_action) ? 'ring-4 ring-red-400/20' : 'ring-4 ring-green-400/20'
+                    (result.logical_deadlock || result.is_starvation) ? 'ring-4 ring-red-400/20' : 'ring-4 ring-green-400/20'
                   }`}>
-                    <div className="text-sm font-black text-slate-400 uppercase tracking-widest mb-1">AI Prediction Result</div>
-                    <div className={`text-4xl font-black mb-3 ${ (result.deadlock || result.recommended_action) ? 'text-red-500' : 'text-green-600'}`}>
-                      {(result.deadlock || result.recommended_action) ? 'DEADLOCK DETECTED' : 'SYSTEM IS SAFE'}
+                    <div className="text-sm font-black text-slate-400 uppercase tracking-widest mb-1">
+                      {result.is_starvation ? 'System Status: Starvation' : 'AI Prediction Result'}
+                    </div>
+                    <div className={`text-4xl font-black mb-3 ${ (result.logical_deadlock || result.is_starvation) ? 'text-red-500' : 'text-green-600'}`}>
+                      {result.logical_deadlock ? 'DEADLOCK DETECTED' : (result.is_starvation ? 'PERMANENT BLOCK' : 'SYSTEM IS SAFE')}
                     </div>
                     
                     <div className="flex flex-wrap justify-center gap-4 mt-6">
@@ -286,7 +289,7 @@ function App() {
                         </span>
                       </div>
                       
-                      {result.safe_sequence && result.safe_sequence.length > 0 && (
+                      {result.safe_sequence && result.safe_sequence.length > 0 && !result.is_starvation && (
                         <div className="text-slate-500 text-sm">
                           Safe Sequence: 
                           <span className="ml-2 px-3 py-1 skeuo-pressed rounded-full text-green-600 font-bold">
@@ -296,23 +299,24 @@ function App() {
                       )}
                     </div>
 
-                    {result.recommended_action && (
+                    {(result.logical_deadlock || result.is_starvation) && result.recommended_action && (
                       <div className="mt-8 p-6 skeuo-pressed rounded-3xl border border-blue-100/50 bg-blue-50/30">
                         <div className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-2">Recommended Resolution</div>
                         <p className="text-sm font-bold text-slate-700 mb-4">{result.recommended_action}</p>
                         <div className="flex flex-wrap justify-center gap-4">
-                          <button 
-                            onClick={() => {
-                              const victimId = parseInt(result.recommended_action?.match(/Process (\d+)/)?.[1] || "-1");
-                              if (victimId !== -1) {
-                                applySafeFix(victimId);
-                              }
-                            }}
-                            className="px-6 py-2 bg-blue-600 text-white rounded-xl text-xs font-black uppercase hover:scale-105 active:scale-95 transition-all shadow-lg"
-                          >
-                            ⚡ Preempt & Fix
-                          </button>
-                          
+                          {result.logical_deadlock ? (
+                            <button 
+                              onClick={() => {
+                                const victimId = parseInt(result.recommended_action?.match(/Process (\d+)/)?.[1] || "-1");
+                                if (victimId !== -1) {
+                                  applySafeFix(victimId);
+                                }
+                              }}
+                              className="px-6 py-2 bg-blue-600 text-white rounded-xl text-xs font-black uppercase hover:scale-105 active:scale-95 transition-all shadow-lg"
+                            >
+                              ⚡ Preempt & Fix
+                            </button>
+                          ) : null}
                           <button 
                             onClick={() => setResult(null)}
                             className="px-6 py-2 bg-slate-200 text-slate-600 rounded-xl text-xs font-black uppercase hover:bg-slate-300 transition-all"
@@ -320,7 +324,9 @@ function App() {
                             Ignore
                           </button>
                         </div>
-                        <p className="mt-3 text-[10px] text-slate-400 italic">Preemption releases process resources back to system pool</p>
+                        <p className="mt-3 text-[10px] text-slate-400 italic">
+                          {result.logical_deadlock ? 'Preemption releases process resources back to system pool' : 'Add more resources to the system to resolve starvation'}
+                        </p>
                       </div>
                     )}
                   </div>
