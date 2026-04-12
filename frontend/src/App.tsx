@@ -12,7 +12,15 @@ function App() {
   const [available, setAvailable] = useState(Array(2).fill(0));
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<{ deadlock: number; confidence: number } | null>(null);
+  const [result, setResult] = useState<{ 
+    deadlock: number; 
+    confidence: number;
+    logical_deadlock: number;
+    deadlocked_processes: number[];
+    safe_sequence: number[];
+    immediate_runnable: number;
+    recommended_action?: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -31,6 +39,29 @@ function App() {
   const handleAvailableChange = (j: number, value: number) => {
     const updated = available.map((v: number, idx: number) => (idx === j ? value : v));
     setAvailable(updated);
+  };
+
+  const applySafeFix = (victim: number) => {
+    // 1. Release all resources assigned to the victim
+    const newAllocation = allocation.map((row, i) => 
+      i === victim ? row.map(() => 0) : [...row]
+    );
+
+    // 2. Clear its requirements so it stops requesting
+    const newMax = max.map((row, i) =>
+      i === victim ? row.map(() => 0) : [...row]
+    );
+
+    // 3. Add reclaimed resources back to the system's available pool
+    const releasedResources = allocation[victim];
+    const newAvailable = available.map((val, j) => val + releasedResources[j]);
+
+    // 4. Update state
+    setAllocation(newAllocation);
+    setMax(newMax);
+    setAvailable(newAvailable);
+    setResult(null); 
+    setStep(2); 
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -240,18 +271,58 @@ function App() {
 
                 {result && (
                   <div className={`p-8 rounded-[2rem] text-center fade-in bg-white/40 border border-white/60 shadow-xl ${
-                    result.deadlock ? 'ring-4 ring-red-400/20' : 'ring-4 ring-green-400/20'
+                    (result.deadlock || result.recommended_action) ? 'ring-4 ring-red-400/20' : 'ring-4 ring-green-400/20'
                   }`}>
                     <div className="text-sm font-black text-slate-400 uppercase tracking-widest mb-1">AI Prediction Result</div>
-                    <div className={`text-4xl font-black mb-3 ${result.deadlock ? 'text-red-500' : 'text-green-600'}`}>
-                      {result.deadlock ? 'DEADLOCK DETECTED' : 'SYSTEM IS SAFE'}
+                    <div className={`text-4xl font-black mb-3 ${ (result.deadlock || result.recommended_action) ? 'text-red-500' : 'text-green-600'}`}>
+                      {(result.deadlock || result.recommended_action) ? 'DEADLOCK DETECTED' : 'SYSTEM IS SAFE'}
                     </div>
-                    <div className="text-slate-500 text-sm">
-                      Model Confidence: 
-                      <span className="ml-2 px-3 py-1 skeuo-pressed rounded-full text-blue-600 font-bold">
-                        {(result.confidence * 100).toFixed(2)}%
-                      </span>
+                    
+                    <div className="flex flex-wrap justify-center gap-4 mt-6">
+                      <div className="text-slate-500 text-sm">
+                        Model Confidence: 
+                        <span className="ml-2 px-3 py-1 skeuo-pressed rounded-full text-blue-600 font-bold">
+                          {(result.confidence * 100).toFixed(2)}%
+                        </span>
+                      </div>
+                      
+                      {result.safe_sequence && result.safe_sequence.length > 0 && (
+                        <div className="text-slate-500 text-sm">
+                          Safe Sequence: 
+                          <span className="ml-2 px-3 py-1 skeuo-pressed rounded-full text-green-600 font-bold">
+                            {result.safe_sequence.map(id => `P${id}`).join(' → ')}
+                          </span>
+                        </div>
+                      )}
                     </div>
+
+                    {result.recommended_action && (
+                      <div className="mt-8 p-6 skeuo-pressed rounded-3xl border border-blue-100/50 bg-blue-50/30">
+                        <div className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-2">Recommended Resolution</div>
+                        <p className="text-sm font-bold text-slate-700 mb-4">{result.recommended_action}</p>
+                        <div className="flex flex-wrap justify-center gap-4">
+                          <button 
+                            onClick={() => {
+                              const victimId = parseInt(result.recommended_action?.match(/Process (\d+)/)?.[1] || "-1");
+                              if (victimId !== -1) {
+                                applySafeFix(victimId);
+                              }
+                            }}
+                            className="px-6 py-2 bg-blue-600 text-white rounded-xl text-xs font-black uppercase hover:scale-105 active:scale-95 transition-all shadow-lg"
+                          >
+                            ⚡ Preempt & Fix
+                          </button>
+                          
+                          <button 
+                            onClick={() => setResult(null)}
+                            className="px-6 py-2 bg-slate-200 text-slate-600 rounded-xl text-xs font-black uppercase hover:bg-slate-300 transition-all"
+                          >
+                            Ignore
+                          </button>
+                        </div>
+                        <p className="mt-3 text-[10px] text-slate-400 italic">Preemption releases process resources back to system pool</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

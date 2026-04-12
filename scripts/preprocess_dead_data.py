@@ -36,6 +36,7 @@ ENGINEERED_PREVENTION_FEATURES: List[str] = [
     "total_need",
     "total_available",
     "num_executable_processes",
+    "contributory_feasible_now",  # STRICT: Can run AND frees resources
     "blocked_processes",
     "fraction_blocked",
     "utilization_ratio",
@@ -153,7 +154,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-pattern-frequency",
         type=int,
-        default=100,
+        default=500,
         help="Maximum rows to keep per identical feature vector (excluding target).",
     )
 
@@ -218,16 +219,60 @@ def normalize_target_column(series: pd.Series) -> pd.Series:
     normalized = normalized.where(normalized.notna(), numeric)
 
     # Keep only 0/1; all others are invalid.
-    normalized = normalized.where(normalized.isin([0, 1]), pd.NA)
+    normalized = normalized.where(normalized.isin([0, 1]), None)
 
     # Return as nullable integer for clean reporting and CSV output.
-    return normalized.astype("Int64")
+    return pd.Series(normalized, dtype="Int64")
 
 
 def _safe_numeric(series: pd.Series, fallback: float = 0.0) -> pd.Series:
     """Convert series to numeric and replace non-finite values safely."""
     values = pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan)
     return values.fillna(fallback)
+
+
+def _parse_array_like(value):
+    """Parse list-like objects safely from Python/JSON literals."""
+    if isinstance(value, (list, tuple, np.ndarray)):
+        return value
+    if pd.isna(value):
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                return parser(text)
+            except (json.JSONDecodeError, ValueError, SyntaxError, TypeError):
+                continue
+    return None
+
+
+def _parse_matrix(value) -> Optional[np.ndarray]:
+    """Parse a 2D numeric matrix from arbitrary row value."""
+    parsed = _parse_array_like(value)
+    if parsed is None:
+        return None
+    try:
+        matrix = np.asarray(parsed, dtype=float)
+        return matrix if matrix.ndim == 2 else None
+    except:
+        return None
+
+
+def _parse_vector(value) -> Optional[np.ndarray]:
+    """Parse a 1D numeric vector from arbitrary row value."""
+    parsed = _parse_array_like(value)
+    if parsed is None:
+        return None
+    try:
+        vector = np.asarray(parsed, dtype=float)
+        if vector.ndim == 2 and 1 in vector.shape:
+            vector = vector.reshape(-1)
+        return vector if vector.ndim == 1 else None
+    except:
+        return None
 
 
 def _parse_blocked_count(raw_value) -> Optional[int]:
@@ -266,6 +311,41 @@ def _parse_blocked_count(raw_value) -> Optional[int]:
             return len(tokens)
 
     return None
+
+
+def _deadlock_label_from_matrices_strict(
+    allocation_matrix: np.ndarray,
+    max_matrix: np.ndarray,
+    available_vector: np.ndarray,
+) -> int:
+    """Return 1 if matrix state is deadlocked, else 0 (Full Safe Sequence Check)."""
+    n_proc, n_res = allocation_matrix.shape
+    need_matrix = max_matrix - allocation_matrix
+
+    work = available_vector.astype(float).copy()
+    # A process is only 'finished' if it has NO need and NO allocation, 
+    # or if we successfully simulate its completion.
+    finish = [False] * n_proc
+
+    # Optimization: processes with 0 allocation and 0 need are effectively non-existent
+    for i in range(n_proc):
+        if np.all(allocation_matrix[i] == 0) and np.all(need_matrix[i] == 0):
+            finish[i] = True
+
+    progressed = True
+    while progressed:
+        progressed = False
+        for i in range(n_proc):
+            if finish[i]:
+                continue
+            if np.all(need_matrix[i] <= work):
+                # Release resources back to pool
+                work = work + allocation_matrix[i]
+                finish[i] = True
+                progressed = True
+
+    # If any process that holds resources or has unmet needs couldn't finish, it's a deadlock
+    return int(any(not done for done in finish))
 
 
 def engineer_prevention_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
@@ -309,11 +389,17 @@ def engineer_prevention_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[s
 
     # If blocked count is unavailable, approximate executability from demand vs available supply.
     avg_need_nonzero = avg_need.where(avg_need > 1e-9, 1e-9)
-    estimated_executable = np.floor(total_available / avg_need_nonzero)
-    estimated_executable = estimated_executable.clip(lower=0.0, upper=num_processes).astype(int)
+    estimated_executable_raw = (total_available / avg_need_nonzero).apply(np.floor)
+    
+    # Clip manually to avoid overload issues with Series
+    estimated_executable = estimated_executable_raw.mask(estimated_executable_raw < 0.0, 0.0)
+    estimated_executable = estimated_executable.mask(estimated_executable > num_processes, num_processes)
+    estimated_executable = estimated_executable.astype(int)
 
     if blocked_from_column is not None and blocked_from_column_count > 0:
-        blocked_count_series = blocked_from_column.fillna((num_processes - estimated_executable).clip(lower=0.0)).astype(float)
+        # Use fillna first to ensure no None before clipping
+        fill_val = (num_processes - estimated_executable).clip(lower=0.0)
+        blocked_count_series = blocked_from_column.fillna(fill_val).astype(float)
     else:
         blocked_count_series = (num_processes - estimated_executable).clip(lower=0.0).astype(float)
 
@@ -324,11 +410,32 @@ def engineer_prevention_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[s
     utilization_ratio = np.where(total_resources > 0, total_allocation / total_resources, 0.0)
     need_to_available_ratio = np.where(total_available > 1e-9, total_need / total_available, total_need)
 
+    # Initialize contributory_feasible_now as 0.0
+    contributory_feasible_now = pd.Series(0.0, index=engineered_df.index)
+
+    # If matrices are present, calculate strict contributory runnability
+    if all(col in df.columns for col in ["allocation_matrix", "max_matrix", "available"]):
+        for idx, row in df.iterrows():
+            alloc = _parse_matrix(row["allocation_matrix"])
+            mx = _parse_matrix(row["max_matrix"])
+            av = _parse_vector(row["available"])
+            
+            if alloc is not None and mx is not None and av is not None:
+                if alloc.shape == mx.shape:
+                    need = mx - alloc
+                    # runnable if need <= av
+                    runnable_mask = np.all(need <= av, axis=1)
+                    # contributory if runnable AND holds any resource
+                    has_res = np.any(alloc > 0, axis=1)
+                    count = int(np.sum(runnable_mask & has_res))
+                    contributory_feasible_now.at[idx] = float(count)
+
     engineered_df["total_allocation"] = total_allocation.astype(float)
     engineered_df["total_max"] = total_max.astype(float)
     engineered_df["total_need"] = total_need.astype(float)
     engineered_df["total_available"] = total_available.astype(float)
     engineered_df["num_executable_processes"] = num_executable_processes.astype(float)
+    engineered_df["contributory_feasible_now"] = contributory_feasible_now.astype(float)
     engineered_df["blocked_processes"] = blocked_count_series.astype(float)
     engineered_df["fraction_blocked"] = pd.Series(fraction_blocked).astype(float)
     engineered_df["utilization_ratio"] = pd.Series(utilization_ratio).astype(float)
@@ -383,10 +490,10 @@ def align_deadlock_target_semantics(
     blocked_means = out_df.groupby(target_col)["fraction_blocked"].mean().to_dict()
 
     info["mean_num_executable_by_label"] = {
-        str(int(k)): float(v) for k, v in exec_means.items()
+        str(int(float(str(k)))): float(v) for k, v in exec_means.items()
     }
     info["mean_fraction_blocked_by_label"] = {
-        str(int(k)): float(v) for k, v in blocked_means.items()
+        str(int(float(str(k)))): float(v) for k, v in blocked_means.items()
     }
 
     exec0 = exec_means.get(0)
@@ -455,7 +562,8 @@ def impute_missing_values(df: pd.DataFrame, feature_cols: List[str]) -> Dict[str
         df[col] = df[col].astype("string").fillna("unknown")
 
     # Report remaining missing values after imputation.
-    return df[feature_cols].isna().sum().astype(int).to_dict()
+    missing_counts = df[feature_cols].isna().sum().astype(int).to_dict()
+    return {str(k): int(v) for k, v in missing_counts.items()}
 
 
 def cap_pattern_frequency(
@@ -647,14 +755,10 @@ def preprocess_dataset(
     shuffle_random_state: int = 42,
 ) -> Tuple[pd.DataFrame, Dict]:
     """
-    Execute end-to-end preprocessing and return cleaned dataframe + metadata report.
-
-    Steps:
-    1) Drop exact duplicate rows.
-    2) Clean and validate target.
-    3) Keep only prevention-time recommended features that exist in dataset.
-    4) Remove constant selected columns (no learning value).
-    5) Impute missing values for final features.
+    1) Clean and validate target.
+    2) Keep only prevention-time recommended features that exist in dataset.
+    3) Remove constant selected columns (no learning value).
+    4) Impute missing values for final features.
     """
     # Record original row count for traceability.
     input_rows = len(df)
@@ -682,8 +786,13 @@ def preprocess_dataset(
     # Align target direction with deadlock semantics (no process can proceed).
     df, target_alignment_info = align_deadlock_target_semantics(df, target_col)
 
-    # Enforce strict deadlock definition: deadlock=1 iff no process can proceed now.
-    logical_target = (pd.to_numeric(df["num_executable_processes"], errors="coerce").fillna(0.0) <= 0.0).astype(int)
+    # Enforce strict deadlock definition: deadlock=1 iff no process can proceed AND release resources.
+    # We prioritize contributory_feasible_now if available (matrix-derived), else fallback to executable.
+    if "contributory_feasible_now" in df.columns and (df["contributory_feasible_now"] > 0).any():
+        logical_target = (pd.to_numeric(df["contributory_feasible_now"], errors="coerce").fillna(0.0) <= 0.0).astype(int)
+    else:
+        logical_target = (pd.to_numeric(df["num_executable_processes"], errors="coerce").fillna(0.0) <= 0.0).astype(int)
+        
     definition_mismatch_ratio = float((logical_target != df[target_col].astype(int)).mean())
     df[target_col] = logical_target
 

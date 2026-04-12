@@ -1,15 +1,15 @@
 {
   "goal": "deadlock prevention (pre-outcome prediction)",
   "rows": {
-    "input": 1010,
-    "after_dedup": 1010,
-    "after_target_cleaning": 1010,
-    "after_pattern_dedup": 1010
+    "input": 1016,
+    "after_dedup": 1016,
+    "after_target_cleaning": 1016,
+    "after_pattern_dedup": 1016
   },
   "target": {
     "name": "deadlock",
     "distribution": {
-      "0": 760,
+      "0": 766,
       "1": 250
     },
     "rows_dropped_invalid_target": 0,
@@ -18,15 +18,15 @@
       "reason": "label orientation inverted to match feasibility semantics",
       "mean_num_executable_by_label": {
         "0": 0.5504950495049505,
-        "1": 2.0772277227722773
+        "1": 2.0704500978473583
       },
       "mean_fraction_blocked_by_label": {
         "0": 0.8816584515594417,
-        "1": 0.8348819497334349
+        "1": 0.8301344773947514
       }
     },
     "strict_deadlock_definition_enforced": true,
-    "original_vs_definition_mismatch_ratio": 0.2524752475247525
+    "original_vs_definition_mismatch_ratio": 0.25098425196850394
   },
   "features": {
     "recommended_prevention_features": [
@@ -39,6 +39,7 @@
       "total_need",
       "total_available",
       "num_executable_processes",
+      "contributory_feasible_now",
       "blocked_processes",
       "fraction_blocked",
       "utilization_ratio",
@@ -61,6 +62,7 @@
       "total_need",
       "total_available",
       "num_executable_processes",
+      "contributory_feasible_now",
       "blocked_processes",
       "fraction_blocked",
       "utilization_ratio",
@@ -83,7 +85,9 @@
       "need_to_available_ratio"
     ],
     "grouping_column": null,
-    "constant_columns_removed": [],
+    "constant_columns_removed": [
+      "contributory_feasible_now"
+    ],
     "leaky_or_unnecessary_columns_found": [
       "version",
       "scenario_id",
@@ -169,7 +173,8 @@
       "starved_processes",
       "failure_type",
       "event_trace_hash",
-      "sim_time_ms"
+      "sim_time_ms",
+      "contributory_feasible_now"
     ],
     "feature_engineering": {
       "engineered_features": [
@@ -178,12 +183,13 @@
         "total_need",
         "total_available",
         "num_executable_processes",
+        "contributory_feasible_now",
         "blocked_processes",
         "fraction_blocked",
         "utilization_ratio",
         "need_to_available_ratio"
       ],
-      "blocked_count_rows_from_source_column": 0,
+      "blocked_count_rows_from_source_column": 6,
       "used_matrix_columns": false,
       "used_aggregate_fallback_columns": {
         "avg_allocation": true,
@@ -195,24 +201,24 @@
   },
   "deduplication": {
     "pattern_dedup_enabled": false,
-    "max_pattern_frequency": 100,
+    "max_pattern_frequency": 1000,
     "rows_removed_by_pattern_dedup": 0
   },
   "diversity_diagnostics": {
-    "unique_feature_vectors_before": 1007,
-    "unique_feature_vectors_after": 1007,
-    "duplicate_rows_before": 3,
-    "duplicate_rows_after": 3,
-    "duplicate_ratio_before": 0.0029702970297029703,
-    "duplicate_ratio_after": 0.0029702970297029703,
+    "unique_feature_vectors_before": 1012,
+    "unique_feature_vectors_after": 1012,
+    "duplicate_rows_before": 4,
+    "duplicate_rows_after": 4,
+    "duplicate_ratio_before": 0.003937007874015748,
+    "duplicate_ratio_after": 0.003937007874015748,
     "class_balance": {
       "applied": false,
       "before": {
-        "0": 760,
+        "0": 766,
         "1": 250
       },
       "after": {
-        "0": 760,
+        "0": 766,
         "1": 250
       }
     },
@@ -225,12 +231,12 @@
     "after_imputation": {}
   },
   "leakage_diagnostics": {
-    "unique_feature_patterns": 1007,
+    "unique_feature_patterns": 1012,
     "conflicting_patterns": 0,
     "max_pattern_frequency": 3,
-    "pattern_to_row_ratio": 0.997029702970297,
+    "pattern_to_row_ratio": 0.9960629921259843,
     "patterns_per_class": {
-      "0": 757,
+      "0": 762,
       "1": 250
     },
     "row_shuffle_needed_for_training": false,

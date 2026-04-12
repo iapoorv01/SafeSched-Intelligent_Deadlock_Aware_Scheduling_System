@@ -53,22 +53,6 @@ AVAILABLE_COLUMN_CANDIDATES = [
     "available_resources",
 ]
 
-MATRIX_MODEL_FEATURE_COLUMNS = [
-    "num_processes",
-    "num_resources",
-    "total_resources",
-    "distributed",
-    "dynamic_join_leave",
-    "total_allocation",
-    "total_max",
-    "total_need",
-    "sum_available",
-    "unmet_need_processes",
-    "feasible_processes_now",
-    "unmet_demand_vs_supply",
-    "resource_utilization_ratio",
-]
-
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments to control data paths and training settings."""
@@ -119,55 +103,6 @@ def parse_args() -> argparse.Namespace:
             "'group_shuffle' uses GroupShuffleSplit with feature-hash groups (recommended); "
             "'random' keeps old stratified row split for comparison only."
         ),
-    )
-
-    # Training mode controls whether to use input CSV or matrix-synthetic training data.
-    parser.add_argument(
-        "--train-mode",
-        type=str,
-        default="dataset",
-        choices=["dataset", "matrix_synthetic"],
-        help=(
-            "Training mode: "
-            "'dataset' trains from --input CSV; "
-            "'matrix_synthetic' generates matrix states, labels them via safe-sequence logic, "
-            "and trains on matrix-derived features aligned with backend inference."
-        ),
-    )
-
-    parser.add_argument(
-        "--synthetic-samples",
-        type=int,
-        default=12000,
-        help="Number of synthetic matrix states to generate in matrix_synthetic mode.",
-    )
-
-    parser.add_argument(
-        "--synthetic-min-processes",
-        type=int,
-        default=3,
-        help="Minimum process count for synthetic matrix generation.",
-    )
-
-    parser.add_argument(
-        "--synthetic-max-processes",
-        type=int,
-        default=12,
-        help="Maximum process count for synthetic matrix generation.",
-    )
-
-    parser.add_argument(
-        "--synthetic-min-resources",
-        type=int,
-        default=2,
-        help="Minimum resource type count for synthetic matrix generation.",
-    )
-
-    parser.add_argument(
-        "--synthetic-max-resources",
-        type=int,
-        default=7,
-        help="Maximum resource type count for synthetic matrix generation.",
     )
 
     # Name of column that carries feature-hash group id from preprocessing.
@@ -291,105 +226,6 @@ def _parse_vector(value) -> Optional[np.ndarray]:
     return vector
 
 
-def add_feasibility_features(
-    x_df: pd.DataFrame,
-) -> Tuple[pd.DataFrame, pd.Series, Dict[str, object]]:
-    """
-    Add deadlock-feasibility-aware features derived from matrices.
-
-    New features:
-    - feasible_processes_now: number of processes with NEED <= available.
-    - unmet_demand_vs_supply: max(total NEED - total available, 0).
-    - potentially_safe: 1 if any process can proceed now, else 0.
-
-    Also returns logical deadlock rule for diagnostics:
-    logical_deadlock_rule = 1 if no process can proceed now, else 0.
-    """
-    x_out = x_df.copy()
-
-    allocation_col = _first_existing_column(x_out, ALLOCATION_COLUMN_CANDIDATES)
-    max_col = _first_existing_column(x_out, MAX_COLUMN_CANDIDATES)
-    available_col = _first_existing_column(x_out, AVAILABLE_COLUMN_CANDIDATES)
-
-    logical_deadlock_rule = pd.Series(np.nan, index=x_out.index, dtype="float64")
-
-    if not allocation_col or not max_col or not available_col:
-        return x_out, logical_deadlock_rule, {
-            "enabled": False,
-            "reason": "Required matrix/vector columns were not found in input features.",
-            "allocation_column": allocation_col,
-            "max_column": max_col,
-            "available_column": available_col,
-        }
-
-    feasible_processes_now = pd.Series(np.nan, index=x_out.index, dtype="float64")
-    unmet_demand_vs_supply = pd.Series(np.nan, index=x_out.index, dtype="float64")
-    potentially_safe = pd.Series(np.nan, index=x_out.index, dtype="float64")
-
-    valid_rows = 0
-    invalid_rows = 0
-
-    for row_index, row in x_out.iterrows():
-        allocation_matrix = _parse_matrix(row[allocation_col])
-        max_matrix = _parse_matrix(row[max_col])
-        available_vector = _parse_vector(row[available_col])
-
-        if allocation_matrix is None or max_matrix is None or available_vector is None:
-            invalid_rows += 1
-            continue
-
-        if allocation_matrix.shape != max_matrix.shape:
-            invalid_rows += 1
-            continue
-
-        n_resources = allocation_matrix.shape[1]
-        if available_vector.shape[0] != n_resources:
-            invalid_rows += 1
-            continue
-
-        if (
-            np.any(allocation_matrix < 0)
-            or np.any(max_matrix < 0)
-            or np.any(available_vector < 0)
-            or np.any(allocation_matrix > max_matrix)
-        ):
-            invalid_rows += 1
-            continue
-
-        need_matrix = max_matrix - allocation_matrix
-        can_proceed_mask = np.all(need_matrix <= available_vector, axis=1)
-        proceed_count = int(np.sum(can_proceed_mask))
-
-        total_need = float(np.sum(need_matrix))
-        total_available = float(np.sum(available_vector))
-        unmet_minus_supply = float(max(total_need - total_available, 0.0))
-
-        feasible_processes_now.loc[row_index] = float(proceed_count)
-        unmet_demand_vs_supply.loc[row_index] = unmet_minus_supply
-        potentially_safe.loc[row_index] = float(proceed_count > 0)
-        logical_deadlock_rule.loc[row_index] = float(proceed_count == 0)
-        valid_rows += 1
-
-    x_out["feasible_processes_now"] = feasible_processes_now
-    x_out["unmet_demand_vs_supply"] = unmet_demand_vs_supply
-    x_out["potentially_safe"] = potentially_safe
-
-    return x_out, logical_deadlock_rule, {
-        "enabled": True,
-        "allocation_column": allocation_col,
-        "max_column": max_col,
-        "available_column": available_col,
-        "valid_rows": int(valid_rows),
-        "invalid_rows": int(invalid_rows),
-        "coverage_ratio": float(valid_rows / len(x_out)) if len(x_out) else 0.0,
-        "features_added": [
-            "feasible_processes_now",
-            "unmet_demand_vs_supply",
-            "potentially_safe",
-        ],
-    }
-
-
 def _deadlock_label_from_matrices(
     allocation_matrix: np.ndarray,
     max_matrix: np.ndarray,
@@ -400,7 +236,14 @@ def _deadlock_label_from_matrices(
     need_matrix = max_matrix - allocation_matrix
 
     work = available_vector.astype(float).copy()
-    finish = [bool(np.all(allocation_matrix[i] == 0)) for i in range(n_proc)]
+    # A process is only 'finished' if it has NO need and NO allocation, 
+    # or if we successfully simulate its completion.
+    finish = [False] * n_proc
+
+    # Optimization: processes with 0 allocation and 0 need are effectively non-existent
+    for i in range(n_proc):
+        if np.all(allocation_matrix[i] == 0) and np.all(need_matrix[i] == 0):
+            finish[i] = True
 
     progressed = True
     while progressed:
@@ -409,10 +252,12 @@ def _deadlock_label_from_matrices(
             if finish[i]:
                 continue
             if np.all(need_matrix[i] <= work):
+                # Only if they hold resources do they actually help the system state
                 work = work + allocation_matrix[i]
                 finish[i] = True
                 progressed = True
 
+    # If any process that holds resources or has unmet needs couldn't finish, it's a deadlock
     return int(any(not done for done in finish))
 
 
@@ -430,7 +275,14 @@ def _engineer_matrix_features(
     total_need = float(np.sum(need_matrix))
     sum_available = float(np.sum(available_vector))
 
-    feasible_processes_now = int(np.sum(np.all(need_matrix <= available_vector, axis=1)))
+    # Identify runnable processes
+    runnable_mask = np.all(need_matrix <= available_vector, axis=1)
+    feasible_processes_now = int(np.sum(runnable_mask))
+    
+    # NEW FEATURE: Runnable processes that actually hold resources to release
+    contributory_mask = runnable_mask & (np.sum(allocation_matrix, axis=1) > 0)
+    contributory_feasible_now = int(np.sum(contributory_mask))
+
     unmet_need_processes = int(np.sum(np.any(need_matrix > available_vector, axis=1)))
     unmet_demand_vs_supply = float(max(total_need - sum_available, 0.0))
 
@@ -449,100 +301,10 @@ def _engineer_matrix_features(
         "sum_available": sum_available,
         "unmet_need_processes": float(unmet_need_processes),
         "feasible_processes_now": float(feasible_processes_now),
+        "contributory_feasible_now": float(contributory_feasible_now), # Added for strict correctness
         "unmet_demand_vs_supply": unmet_demand_vs_supply,
         "resource_utilization_ratio": resource_utilization_ratio,
     }
-
-
-def generate_matrix_synthetic_dataset(
-    n_samples: int,
-    random_state: int,
-    min_processes: int,
-    max_processes: int,
-    min_resources: int,
-    max_resources: int,
-) -> Tuple[pd.DataFrame, pd.Series, Dict[str, object]]:
-    """Generate matrix states and labels so model can learn feasibility behavior."""
-    if n_samples <= 0:
-        raise ValueError("synthetic sample count must be positive")
-
-    rng = np.random.default_rng(seed=random_state)
-    feature_rows: List[Dict[str, float]] = []
-    labels: List[int] = []
-
-    max_attempts = max(n_samples * 15, 1000)
-    attempts = 0
-
-    while len(feature_rows) < n_samples and attempts < max_attempts:
-        attempts += 1
-
-        n_proc = int(rng.integers(min_processes, max_processes + 1))
-        n_res = int(rng.integers(min_resources, max_resources + 1))
-
-        max_matrix = rng.integers(0, 8, size=(n_proc, n_res)).astype(float)
-        allocation_matrix = np.zeros((n_proc, n_res), dtype=float)
-
-        # Keep allocation <= max per cell.
-        for i in range(n_proc):
-            for j in range(n_res):
-                cap = int(max_matrix[i, j])
-                allocation_matrix[i, j] = float(rng.integers(0, cap + 1)) if cap > 0 else 0.0
-
-        # Bias availability low enough often to produce blocked/deadlock states.
-        available_vector = rng.integers(0, 4, size=n_res).astype(float)
-
-        features = _engineer_matrix_features(
-            allocation_matrix=allocation_matrix,
-            max_matrix=max_matrix,
-            available_vector=available_vector,
-        )
-        label = _deadlock_label_from_matrices(
-            allocation_matrix=allocation_matrix,
-            max_matrix=max_matrix,
-            available_vector=available_vector,
-        )
-
-        feature_rows.append(features)
-        labels.append(label)
-
-    if len(feature_rows) < n_samples:
-        raise RuntimeError(
-            f"Unable to generate requested synthetic samples. generated={len(feature_rows)}, requested={n_samples}."
-        )
-
-    x_df = pd.DataFrame(feature_rows)
-    x_df = x_df[MATRIX_MODEL_FEATURE_COLUMNS].copy()
-    y_series = pd.Series(labels, name="deadlock").astype(int)
-
-    # Moderate rebalance to avoid collapse if one class dominates.
-    class_counts = y_series.value_counts().to_dict()
-    if len(class_counts) == 2:
-        majority_class = int(max(class_counts, key=class_counts.get))
-        minority_class = int(min(class_counts, key=class_counts.get))
-        majority_idx = y_series[y_series == majority_class].index
-        minority_idx = y_series[y_series == minority_class].index
-
-        keep_majority = int(min(len(majority_idx), max(len(minority_idx) * 2, 1)))
-        keep_idx = np.concatenate(
-            [
-                rng.choice(majority_idx.to_numpy(), size=keep_majority, replace=False),
-                minority_idx.to_numpy(),
-            ]
-        )
-        rng.shuffle(keep_idx)
-
-        x_df = x_df.loc[keep_idx].reset_index(drop=True)
-        y_series = y_series.loc[keep_idx].reset_index(drop=True)
-
-    info = {
-        "mode": "matrix_synthetic",
-        "requested_samples": int(n_samples),
-        "generated_samples": int(len(y_series)),
-        "attempts": int(attempts),
-        "class_distribution": y_series.value_counts().sort_index().astype(int).to_dict(),
-        "feature_columns": MATRIX_MODEL_FEATURE_COLUMNS,
-    }
-    return x_df, y_series, info
 
 
 def summarize_class_distribution(y_series: pd.Series) -> Dict[str, Dict[str, float]]:
@@ -552,7 +314,9 @@ def summarize_class_distribution(y_series: pd.Series) -> Dict[str, Dict[str, flo
 
     summary: Dict[str, Dict[str, float]] = {}
     for class_value, count in counts.items():
-        summary[str(int(class_value))] = {
+        # Ensure class_value is treated as int before string conversion
+        class_key = str(int(float(str(class_value))))
+        summary[class_key] = {
             "count": int(count),
             "pct": float(round((count / total) * 100.0, 4)) if total > 0 else 0.0,
         }
@@ -627,7 +391,7 @@ def build_pattern_keys(x_df: pd.DataFrame) -> pd.Series:
     Rows with identical feature vectors will have identical keys.
     This is used for leakage diagnostics and pattern-holdout splitting.
     """
-    return x_df.astype(str).agg("||".join, axis=1)
+    return x_df.fillna("NA").apply(lambda x: "||".join(x.astype(str).values), axis=1)
 
 
 def compute_leakage_diagnostics(
@@ -781,6 +545,12 @@ def split_dataset(
                 selected_attempt = attempt_idx
 
     # Build selected split.
+    # Note: selected_train_idx/test_idx are numpy arrays from splitter.split
+    if selected_train_idx is None or selected_test_idx is None:
+        # Fallback to simple split if splitter fails to find anything (rare)
+        xtr, xte, ytr, yte = train_test_split(x_df, y_series, test_size=test_size, random_state=random_state, stratify=y_series)
+        return xtr, xte, ytr, yte, {"split_mode": "random_fallback", "group_train": pd.Series(dtype=str), "group_test": pd.Series(dtype=str)}
+
     x_train = x_df.iloc[selected_train_idx].copy()
     x_test = x_df.iloc[selected_test_idx].copy()
     y_train = y_series.iloc[selected_train_idx].copy()
@@ -985,9 +755,9 @@ def evaluate_model(
         threshold_results,
         key=lambda row: (
             int(row["passes_behavior_checks"]),
+            row["accuracy"],     # Prioritize overall correctness
+            row["precision"],    # Don't flag safe states as deadlocks
             row["f1"],
-            row["recall"],
-            row["precision"],
             -row["threshold"],
         ),
     )
@@ -1094,36 +864,12 @@ def main() -> None:
     args.model_out.parent.mkdir(parents=True, exist_ok=True)
     args.metrics_out.parent.mkdir(parents=True, exist_ok=True)
 
-    if args.train_mode == "matrix_synthetic":
-        x_df, y_series, synthetic_info = generate_matrix_synthetic_dataset(
-            n_samples=args.synthetic_samples,
-            random_state=args.random_state,
-            min_processes=args.synthetic_min_processes,
-            max_processes=args.synthetic_max_processes,
-            min_resources=args.synthetic_min_resources,
-            max_resources=args.synthetic_max_resources,
-        )
-        group_from_column = False
-        logical_deadlock_rule = y_series.astype(float).copy()
-        feasibility_feature_info = {
-            "enabled": True,
-            "source": "matrix_synthetic_generation",
-            "features_added": [],
-            "valid_rows": int(len(x_df)),
-            "invalid_rows": 0,
-            "coverage_ratio": 1.0,
-            "synthetic_info": synthetic_info,
-        }
-    else:
-        # Load cleaned dataset.
-        x_df, y_series, group_from_column = load_dataset(
-            args.input,
-            args.target,
-            args.group_column,
-        )
-
-        # Add feasibility-aware features from matrix state when matrix columns are available.
-        x_df, logical_deadlock_rule, feasibility_feature_info = add_feasibility_features(x_df)
+    # Load cleaned dataset.
+    x_df, y_series, group_from_column = load_dataset(
+        args.input,
+        args.target,
+        args.group_column,
+    )
 
     # Capture first target values before shuffle for debugging ordering bias.
     target_head_before_shuffle = y_series.head(10).tolist()
@@ -1132,7 +878,6 @@ def main() -> None:
     shuffled_index = x_df.sample(frac=1.0, random_state=args.random_state).index
     x_df = x_df.loc[shuffled_index].reset_index(drop=True)
     y_series = y_series.loc[shuffled_index].reset_index(drop=True)
-    logical_deadlock_rule = logical_deadlock_rule.loc[shuffled_index].reset_index(drop=True)
 
     # Capture first target values after shuffle to confirm shuffling happened.
     target_head_after_shuffle = y_series.head(10).tolist()
@@ -1174,12 +919,11 @@ def main() -> None:
     pipeline.fit(x_train, y_train)
 
     # Evaluate model on holdout set.
-    logical_deadlock_test = logical_deadlock_rule.loc[x_test.index]
     metrics = evaluate_model(
         pipeline,
         x_test,
         y_test,
-        logical_deadlock_rule=logical_deadlock_test,
+        logical_deadlock_rule=None,
     )
 
     # Add simple metadata to metrics output for traceability.
@@ -1209,8 +953,6 @@ def main() -> None:
         },
         "group_column": args.group_column,
         "group_column_found_in_input": bool(group_from_column),
-        "train_mode": args.train_mode,
-        "feasibility_features": feasibility_feature_info,
         "model": "LogisticRegression",
     }
     metrics["leakage_diagnostics"] = leakage_diagnostics
@@ -1253,23 +995,6 @@ def main() -> None:
         "Test pattern overlap ratio: "
         f"{metrics['leakage_diagnostics']['test_pattern_overlap_ratio']:.4f}"
     )
-    if metrics["logic_alignment"].get("enabled", False):
-        print(
-            "Model vs feasibility-rule mismatch ratio: "
-            f"{metrics['logic_alignment']['mismatch_ratio']:.4f} "
-            f"({metrics['logic_alignment']['mismatch_count']}/"
-            f"{metrics['logic_alignment']['compared_rows']})"
-        )
-        if metrics["logic_alignment"]["mismatch_examples"]:
-            print(
-                "First mismatch example: "
-                f"{metrics['logic_alignment']['mismatch_examples'][0]}"
-            )
-    else:
-        print(
-            "Model vs feasibility-rule comparison skipped: "
-            f"{metrics['logic_alignment'].get('reason', 'n/a')}"
-        )
     if metrics["behavior_checks"]["passes_all"]:
         print("Behavior checks passed for canonical deadlock/safe cases")
     else:
@@ -1281,3 +1006,4 @@ def main() -> None:
 # Script entry point.
 if __name__ == "__main__":
     main()
+
