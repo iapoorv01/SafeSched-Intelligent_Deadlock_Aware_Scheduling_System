@@ -1,32 +1,78 @@
-import { NextRequest, NextResponse } from 'next/server';
-
-// In-memory simulation state for demo (replace with persistent or backend logic as needed)
-let simulationStep = 0;
-let isPlaying = false;
+import { store, applyTick, resetStore, addEvent, type SchedulerPolicy } from '../store';
 
 export async function GET() {
-  // Return current simulation state
-  return NextResponse.json({ step: simulationStep, isPlaying });
+  const sim = store.simulation;
+  if (sim.isPlaying) {
+    const now = Date.now();
+    const elapsed = Math.max(0, now - sim.lastTickAt);
+    const ticks = Math.floor(elapsed / 1000);
+    if (ticks > 0) {
+      for (let i = 0; i < ticks; i++) applyTick();
+      sim.lastTickAt = now;
+    }
+  }
+  return {
+    tick: sim.tick,
+    isPlaying: sim.isPlaying,
+    policy: sim.policy,
+    rrQuantum: sim.rrQuantum,
+    currentPid: sim.currentPid,
+    deadlockedPids: sim.deadlockedPids,
+    wfgCycles: sim.wfgCycles,
+    bankersResult: sim.bankersResult,
+    processes: store.processes,
+    resources: store.resources,
+  };
 }
 
-export async function POST(req: NextRequest) {
-  const { action } = await req.json();
+export async function POST(body: {
+  action?: 'play' | 'pause' | 'step' | 'reset';
+  policy?: SchedulerPolicy;
+  rrQuantum?: number;
+}) {
+  const sim = store.simulation;
+  const { action, policy, rrQuantum } = body;
+
+  if (policy) {
+    sim.policy = policy;
+    addEvent('SYSTEM', 'info', `Scheduler policy changed to ${policy}`);
+  }
+  if (rrQuantum && rrQuantum > 0) {
+    sim.rrQuantum = rrQuantum;
+    addEvent('SYSTEM', 'info', `RR quantum set to ${rrQuantum}`);
+  }
+
   switch (action) {
     case 'play':
-      isPlaying = true;
+      sim.isPlaying = true;
+      sim.lastTickAt = Date.now();
+      addEvent('SYSTEM', 'info', 'Simulation started.');
       break;
     case 'pause':
-      isPlaying = false;
+      sim.isPlaying = false;
+      addEvent('SYSTEM', 'info', 'Simulation paused.');
       break;
     case 'step':
-      simulationStep += 1;
+      applyTick();
+      sim.lastTickAt = Date.now();
       break;
     case 'reset':
-      simulationStep = 0;
-      isPlaying = false;
+      resetStore();
       break;
     default:
-      return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+      if (!policy && !rrQuantum) throw new Error('Invalid action');
   }
-  return NextResponse.json({ step: simulationStep, isPlaying });
+
+  return {
+    tick: sim.tick,
+    isPlaying: sim.isPlaying,
+    policy: sim.policy,
+    rrQuantum: sim.rrQuantum,
+    currentPid: sim.currentPid,
+    deadlockedPids: sim.deadlockedPids,
+    wfgCycles: sim.wfgCycles,
+    bankersResult: sim.bankersResult,
+    processes: store.processes,
+    resources: store.resources,
+  };
 }

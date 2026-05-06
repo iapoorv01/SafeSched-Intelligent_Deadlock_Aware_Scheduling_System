@@ -40,6 +40,136 @@
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
   }
+
+  .slide-up {
+    animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .pulse-ring {
+    animation: pulseRing 2s ease-in-out infinite;
+  }
+
+  @keyframes pulseRing {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(37,99,235,0.3); }
+    50% { box-shadow: 0 0 0 8px rgba(37,99,235,0); }
+  }
+
+  .pulse-ring-red {
+    animation: pulseRingRed 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulseRingRed {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+    50% { box-shadow: 0 0 0 10px rgba(239,68,68,0); }
+  }
+
+  .tick-flash {
+    animation: tickFlash 0.3s ease-out;
+  }
+
+  @keyframes tickFlash {
+    0% { background: rgba(37,99,235,0.2); }
+    100% { background: transparent; }
+  }
+
+  .bar-fill {
+    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .card-hover {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 12px 12px 20px rgb(163,177,198,0.7), -12px -12px 20px rgba(255,255,255,0.6);
+  }
+
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+  }
+  .status-dot.running  { background: #22c55e; animation: pulseRing 2s infinite; }
+  .status-dot.blocked  { background: #ef4444; animation: pulseRingRed 1.5s infinite; }
+  .status-dot.waiting  { background: #f59e0b; }
+  .status-dot.terminated { background: #94a3b8; }
+
+  .seq-arrow {
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .seq-arrow::after {
+    content: '→'; color: #94a3b8; font-size: 12px;
+  }
+  .seq-arrow:last-child::after { content: ''; }
+
+  .glass-card-dark {
+    @apply bg-slate-800/40 backdrop-blur-xl border border-slate-600/40 shadow-2xl;
+  }
+
+  .skeuo-stat {
+    @apply skeuo-pressed rounded-2xl p-4 text-center;
+  }
+
+  /* Tour overlay */
+  .tour-overlay {
+    position: fixed; inset: 0; z-index: 9999;
+    background: rgba(15, 23, 42, 0.72);
+    backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  .tour-card {
+    @apply glass-card;
+    border-radius: 24px;
+    padding: 36px 40px;
+    max-width: 520px;
+    width: 90vw;
+    animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .tour-step-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block; transition: all 0.3s;
+  }
+
+  /* Highlight beacon for tour targets */
+  .tour-beacon {
+    position: absolute;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: #2563eb;
+    animation: beacon 1.5s ease-in-out infinite;
+    z-index: 100;
+  }
+
+  @keyframes beacon {
+    0%, 100% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(37,99,235,0.5); }
+    50% { transform: scale(1.2); opacity: 0.8; box-shadow: 0 0 0 10px rgba(37,99,235,0); }
+  }
+
+  /* Node enter animation for SVG (via CSS class on g element) */
+  .node-enter {
+    animation: nodeEnter 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes nodeEnter {
+    from { transform: scale(0); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+
+  /* Edge draw animation */
+  .edge-draw {
+    stroke-dashoffset: 1000;
+    animation: edgeDraw 0.8s ease-out forwards;
+  }
+
+  @keyframes edgeDraw {
+    to { stroke-dashoffset: 0; }
+  }
 }
 
 /* Custom scrollbar */
