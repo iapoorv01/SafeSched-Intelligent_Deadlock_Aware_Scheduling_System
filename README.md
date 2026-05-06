@@ -78,3 +78,101 @@ While the core engine is battle-tested, we are currently developing feature-rich
 
 ---
 *SafeSched: Ensuring Logical Integrity in Distributed Environments.*
+
+---
+
+## 📂 Repository Structure
+
+```text
+SafeSched/
+├── backend/
+│   ├── app/
+│   │   ├── core/
+│   │   │   ├── banker.py
+│   │   │   ├── cluster_manager.py
+│   │   │   ├── deadlock_detector.py
+│   │   │   ├── distributed_checkpoint_manager.py
+│   │   │   ├── distributed_deadlock_detector.py
+│   │   │   ├── graph_builder.py
+│   │   │   ├── request_queue.py
+│   │   │   ├── simulation_engine.py
+│   │   │   └── validator.py
+│   │   ├── models/
+│   │   │   ├── event_models.py
+│   │   │   ├── resource_models.py
+│   │   │   └── system_models.py
+│   │   ├── services/
+│   │   │   └── scenario_service.py
+│   │   └── utils/
+│   │       └── helpers.py
+│   ├── tests/
+│   │   ├── test_banker.py
+│   │   ├── test_deadlock.py
+│   │   ├── test_deadlock_dataset_generator.py
+│   │   ├── test_distributed_system.py
+│   │   ├── test_edge_cases.py
+│   │   ├── test_event_log_and_scalability.py
+│   │   ├── test_graph_builder.py
+│   │   ├── test_recovery_and_rollback.py
+│   │   ├── test_replay_and_export.py
+│   │   ├── test_request_queue.py
+│   │   ├── test_simulation.py
+│   │   └── test_validator.py
+│   └── SAFE_BACKEND_OVERVIEW.md
+├── config/
+│   └── generator_config.json
+├── datasets/
+│   ├── dead_data.csv
+│   ├── dead_data_preprocess_report.json
+│   └── dead_data_preprocessed.csv
+├── frontend/
+│   ├── public/
+│   │   ├── index.html
+│   │   ├── manifest.json
+│   │   └── robots.txt
+│   ├── src/
+│   │   ├── App.css
+│   │   ├── App.test.tsx
+│   │   ├── App.tsx
+│   │   ├── index.css
+│   │   ├── index.tsx
+│   │   ├── reportWebVitals.ts
+│   │   ├── service-worker.ts
+│   │   ├── serviceWorkerRegistration.ts
+│   │   └── setupTests.ts
+│   ├── index.html
+│   ├── package.json
+│   ├── postcss.config.js
+│   ├── tailwind.config.js
+│   ├── tsconfig.json
+│   ├── tsconfig.node.json
+│   ├── vercel.json
+│   └── vite.config.ts
+├── models/
+│   ├── logistic_regression_deadlock.joblib
+│   └── logistic_regression_metrics.json
+├── safesched-deadlock_api/
+│   ├── models/
+│   │   ├── logistic_regression_deadlock.joblib
+│   │   └── logistic_regression_metrics.json
+│   ├── README.md
+│   ├── apprunner.yaml
+│   ├── main.py
+│   ├── requirements.txt
+│   └── start.sh
+├── scripts/
+│   ├── check_parquet_results.py
+│   ├── custom_logger.py
+│   ├── custom_policy.py
+│   ├── deadlock_train_schema.json
+│   ├── edge_cases_config.json
+│   ├── generate_deadlock_dataset.py
+│   ├── merge_dataset_parts.py
+│   ├── parallel_generate_deadlock_dataset.py
+│   ├── preprocess_dead_data.py
+│   ├── run_generator.py
+│   └── train_logistic_regression.py
+├── README.md
+├── requirements.txt
+└── SafeSched Development Flow.md
+```

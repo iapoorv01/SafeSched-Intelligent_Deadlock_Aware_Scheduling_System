@@ -23,6 +23,7 @@ function App() {
     recommended_action?: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
 
   useEffect(() => {
     setAllocation(initialMatrix(processes, resources));

@@ -201,7 +201,7 @@
   },
   "deduplication": {
     "pattern_dedup_enabled": false,
-    "max_pattern_frequency": 1000,
+    "max_pattern_frequency": 500,
     "rows_removed_by_pattern_dedup": 0
   },
   "diversity_diagnostics": {

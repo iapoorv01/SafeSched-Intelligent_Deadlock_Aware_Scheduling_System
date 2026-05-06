@@ -112,7 +112,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input",
         type=Path,
-        default=Path("datasets/dead_data.csv"),
+        default=Path("../datasets/dead_data.csv"),
         help="Path to raw CSV dataset.",
     )
 
@@ -120,7 +120,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("datasets/dead_data_preprocessed.csv"),
+        default=Path("../datasets/dead_data_preprocessed.csv"),
         help="Path to write cleaned CSV dataset.",
     )
 
@@ -128,7 +128,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--report",
         type=Path,
-        default=Path("datasets/dead_data_preprocess_report.json"),
+        default=Path("../datasets/dead_data_preprocess_report.json"),
         help="Path to write preprocessing report JSON.",
     )
 
