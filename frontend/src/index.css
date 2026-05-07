@@ -170,6 +170,36 @@
   @keyframes edgeDraw {
     to { stroke-dashoffset: 0; }
   }
+
+  /* Graph glassmorphic panel */
+  .graph-panel {
+    @apply glass-card rounded-2xl overflow-hidden;
+    background: linear-gradient(135deg, rgba(255,255,255,0.45) 0%, rgba(224,229,236,0.35) 100%);
+  }
+
+  /* Starvation warning pulse */
+  .starvation-warn {
+    animation: starvationPulse 2s ease-in-out infinite;
+  }
+
+  @keyframes starvationPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(245,158,11,0); }
+  }
+
+  /* Smooth number counter */
+  .counter-num {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Glassmorphic tooltip */
+  .glass-tooltip {
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(37,99,235,0.2);
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(37,99,235,0.12);
+  }
 }
 
 /* Custom scrollbar */

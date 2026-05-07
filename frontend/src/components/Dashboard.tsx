@@ -11,6 +11,7 @@ type ProcessRecord = {
   pid: string; allocation: number[]; max: number[]; need: number[];
   status: 'RUNNING'|'WAITING'|'BLOCKED'|'TERMINATED';
   priority: number; age: number; waitTicks: number; rollbackCount: number; criticality: number;
+  burstTime?: number; remainingTime?: number;
 };
 type ResourceRecord = { id: string; label: string; total: number; available: number; type: string };
 type BankersStep = { pid: string; workBefore: number[]; need: number[]; allocation: number[]; workAfter: number[] };
@@ -21,6 +22,7 @@ type CheckpointInfo = { id: string; tick: number; description: string; ts: numbe
 type SchedulerPolicy = 'FCFS'|'RR'|'PRIORITY'|'PRIORITY_AGING';
 type SimState = {
   tick: number; isPlaying: boolean; policy: SchedulerPolicy; rrQuantum: number;
+  tickIntervalMs: number; starvationThreshold: number;
   currentPid: string|null; deadlockedPids: string[]; wfgCycles: string[][];
   bankersResult: BankersResult|null; processes: ProcessRecord[]; resources: ResourceRecord[];
 };
@@ -181,39 +183,142 @@ function BankersStepsSection({ steps }: { steps: BankersStep[] }) {
   );
 }
 
-// ── Tour steps data ───────────────────────────────────────────────────────────
+// ── Tour steps — each targets a CSS selector on the page ─────────────────────
 const TOUR_STEPS = [
   {
-    emoji: '👋',
-    title: 'Welcome to SafeSched!',
-    desc: "This is a deadlock simulation dashboard. A deadlock is when processes get stuck waiting for each other forever — like a traffic jam that never clears. Let's take a quick tour!",
+    target: '[data-tour="header"]',
+    title: '🛡 SafeSched Dashboard',
+    desc: 'This is your deadlock simulation control center. The colored badge shows system health — green means safe, red means deadlock detected. Use ▶ Play to start the simulation.',
+    position: 'bottom' as const,
   },
   {
-    emoji: '📊',
-    title: 'The Overview Tab',
-    desc: 'Here you can see all your processes (tasks) and resources (like CPU and Memory). Watch them update in real time as the simulation runs. Press ▶ Play to start!',
+    target: '[data-tour="processes"]',
+    title: '⚙️ Active Processes',
+    desc: 'Each card is a running process (like a program on your computer). The colored dot shows its state: 🟢 Running, 🟡 Waiting for a resource, 🔴 Blocked (can\'t get what it needs). The bars show how much of each resource it currently holds vs. its maximum demand.',
+    position: 'right' as const,
   },
   {
-    emoji: '🏦',
-    title: 'Safety Check',
-    desc: "The Banker's Algorithm checks if the system is in a 'safe state' — meaning all processes can eventually finish without deadlocking. Green = safe, Red = danger!",
+    target: '[data-tour="resources"]',
+    title: '📦 System Resources',
+    desc: 'Resources are things processes need — like CPU time or Memory. The progress bar shows how much is in use. Blue dots = used units, grey dots = free units. When all units are taken and another process needs them, a deadlock can form.',
+    position: 'right' as const,
   },
   {
-    emoji: '🕸',
-    title: 'The Graph',
-    desc: 'The Resource Allocation Graph (RAG) shows which processes hold which resources. If you see a red cycle, that\'s a deadlock! The Wait-For Graph (WFG) shows which processes are waiting for each other.',
+    target: '[data-tour="inject"]',
+    title: '💉 Inject a Request',
+    desc: 'This is how you manually tell a process to request a resource. Pick a process, pick a resource, set how many units it needs, and hit Inject. The simulation will try to grant it safely using the Banker\'s Algorithm.',
+    position: 'left' as const,
   },
   {
-    emoji: '🛡',
-    title: 'Recovery',
-    desc: 'If a deadlock is detected, this tab shows you how to fix it. You can preempt (forcibly stop) a process to free up resources, or roll back to a saved checkpoint.',
-  },
-  {
-    emoji: '🎉',
-    title: "You're ready!",
-    desc: 'You can also use the Replay tab to reproduce any simulation with a seed number, and the Learn tab for deeper explanations. Click any tab to explore. Have fun!',
+    target: '[data-tour="tabnav"]',
+    title: '🗂 Navigation Tabs',
+    desc: '• Safety Check — see if the system can finish all processes safely\n• Graph — visual map of who holds what\n• Recovery — fix deadlocks when they happen\n• Replay — reproduce any simulation with a seed\n• Learn — deep explanations of every concept',
+    position: 'bottom' as const,
   },
 ];
+
+// ── Inline Tour Tooltip ───────────────────────────────────────────────────────
+function TourTooltip({
+  step, total, stepIdx, onNext, onPrev, onClose,
+}: {
+  step: typeof TOUR_STEPS[0]; total: number; stepIdx: number;
+  onNext: () => void; onPrev: () => void; onClose: () => void;
+}) {
+  const [pos, setPos] = useState<{ top: number; left: number; arrowSide: string } | null>(null);
+
+  useEffect(() => {
+    const el = document.querySelector(step.target);
+    if (!el) { setPos({ top: 80, left: window.innerWidth / 2 - 180, arrowSide: 'none' }); return; }
+    const rect = el.getBoundingClientRect();
+    const TW = 360;
+    let top = 0, left = 0, arrowSide = 'top';
+    if (step.position === 'bottom') {
+      top = rect.bottom + 12;
+      left = Math.min(rect.left + rect.width / 2 - TW / 2, window.innerWidth - TW - 16);
+      arrowSide = 'top';
+    } else if (step.position === 'right') {
+      top = rect.top;
+      left = rect.right + 12;
+      arrowSide = 'left';
+    } else {
+      top = rect.top;
+      left = rect.left - TW - 12;
+      arrowSide = 'right';
+    }
+    left = Math.max(8, Math.min(left, window.innerWidth - TW - 8));
+    setPos({ top, left, arrowSide });
+
+    // Highlight target
+    (el as HTMLElement).style.outline = '3px solid #2563eb';
+    (el as HTMLElement).style.outlineOffset = '4px';
+    (el as HTMLElement).style.borderRadius = '12px';
+    (el as HTMLElement).style.transition = 'outline 0.2s';
+    return () => {
+      (el as HTMLElement).style.outline = '';
+      (el as HTMLElement).style.outlineOffset = '';
+    };
+  }, [step]);
+
+  if (!pos) return null;
+
+  return (
+    <div
+      style={{
+        position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999,
+        width: 360, background: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(16px)',
+        border: '1.5px solid rgba(37,99,235,0.3)', borderRadius: 16,
+        boxShadow: '0 8px 32px rgba(37,99,235,0.18), 0 2px 8px rgba(0,0,0,0.08)',
+        padding: '18px 20px',
+      }}
+    >
+      {/* Arrow indicator */}
+      {pos.arrowSide === 'top' && (
+        <div style={{ position: 'absolute', top: -8, left: '50%', transform: 'translateX(-50%)',
+          width: 0, height: 0, borderLeft: '8px solid transparent', borderRight: '8px solid transparent',
+          borderBottom: '8px solid rgba(37,99,235,0.3)' }} />
+      )}
+      {pos.arrowSide === 'left' && (
+        <div style={{ position: 'absolute', left: -8, top: 20,
+          width: 0, height: 0, borderTop: '8px solid transparent', borderBottom: '8px solid transparent',
+          borderRight: '8px solid rgba(37,99,235,0.3)' }} />
+      )}
+      {pos.arrowSide === 'right' && (
+        <div style={{ position: 'absolute', right: -8, top: 20,
+          width: 0, height: 0, borderTop: '8px solid transparent', borderBottom: '8px solid transparent',
+          borderLeft: '8px solid rgba(37,99,235,0.3)' }} />
+      )}
+
+      <div className="flex items-start justify-between mb-2">
+        <span className="font-bold text-slate-800 text-sm leading-snug">{step.title}</span>
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none ml-2">×</button>
+      </div>
+      <p className="text-slate-600 text-xs leading-relaxed mb-4 whitespace-pre-line">{step.desc}</p>
+
+      {/* Progress dots */}
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1.5">
+          {Array.from({ length: total }).map((_, i) => (
+            <span key={i} style={{
+              width: 6, height: 6, borderRadius: '50%', display: 'inline-block',
+              background: i === stepIdx ? '#2563eb' : '#cbd5e1',
+              transition: 'background 0.2s',
+            }} />
+          ))}
+        </div>
+        <div className="flex gap-2">
+          {stepIdx > 0 && (
+            <button onClick={onPrev} className="skeuo-button text-xs px-3 py-1.5">← Back</button>
+          )}
+          {stepIdx < total - 1 ? (
+            <button onClick={onNext} className="skeuo-button text-xs px-3 py-1.5 text-blue-600">Next →</button>
+          ) : (
+            <button onClick={onClose} className="skeuo-button text-xs px-3 py-1.5 text-blue-600 font-bold">Done 🎉</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Main Dashboard component ──────────────────────────────────────────────────
 export default function Dashboard() {
@@ -225,7 +330,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   // Tab & graph
-  const [activeTab, setActiveTab] = useState<'overview'|'banker'|'graph'|'recovery'|'replay'|'learn'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview'|'banker'|'graph'|'recovery'|'replay'|'learn'|'manage'>('overview');
   const [graphMode, setGraphMode] = useState<'rag'|'wfg'>('rag');
   const [graphRefreshKey, setGraphRefreshKey] = useState(0);
 
@@ -251,6 +356,18 @@ export default function Dashboard() {
 
   // Learn accordion
   const [learnOpen, setLearnOpen] = useState<boolean[]>([false, false, false, false, false]);
+
+  // ── Manage panel state ──
+  const [newProcPid, setNewProcPid]         = useState('');
+  const [newProcMax, setNewProcMax]         = useState('');
+  const [newProcPriority, setNewProcPriority] = useState(1);
+  const [newProcBurst, setNewProcBurst]     = useState(8);
+  const [newResLabel, setNewResLabel]       = useState('');
+  const [newResTotal, setNewResTotal]       = useState(5);
+  const [newResType, setNewResType]         = useState('GENERIC');
+  const [manageError, setManageError]       = useState('');
+  const [speedMs, setSpeedMs]               = useState(1000);
+  const [starvThreshold, setStarvThreshold] = useState(15);
 
   // Tour
   const [showTour, setShowTour] = useState<boolean>(() => {
@@ -289,6 +406,8 @@ export default function Dashboard() {
       if (loading) {
         setPolicyDraft(simData.policy);
         setRrQuantumDraft(simData.rrQuantum);
+        if (simData.tickIntervalMs) setSpeedMs(simData.tickIntervalMs);
+        if (simData.starvationThreshold) setStarvThreshold(simData.starvationThreshold);
         setLoading(false);
       }
 
@@ -390,81 +509,105 @@ export default function Dashboard() {
     setShowTour(false);
   }, []);
 
-  const skipTour = useCallback(() => {
-    try { localStorage.setItem('safesched_tour_done', '1'); } catch {}
-    setShowTour(false);
+  // ── Manage handlers ──────────────────────────────────────────────────────
+  const addProcessHandler = useCallback(async () => {
+    setManageError('');
+    const maxArr = newProcMax.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+    if (maxArr.length === 0) { setManageError('Enter max demand as comma-separated numbers e.g. 3,2'); return; }
+    const res = await localApiFetch('/api/scenario', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'add_process', pid: newProcPid || undefined, max: maxArr, priority: newProcPriority, burstTime: newProcBurst }),
+    });
+    if (!res.ok) { const d = await res.json() as any; setManageError(d?.error ?? 'Failed'); return; }
+    setNewProcPid(''); setNewProcMax('');
+    fetchAll();
+  }, [newProcPid, newProcMax, newProcPriority, newProcBurst, fetchAll]);
+
+  const removeProcessHandler = useCallback(async (pid: string) => {
+    setManageError('');
+    const res = await localApiFetch('/api/scenario', { method: 'POST', body: JSON.stringify({ action: 'remove_process', id: pid }) });
+    if (!res.ok) { const d = await res.json() as any; setManageError(d?.error ?? 'Failed'); return; }
+    fetchAll();
+  }, [fetchAll]);
+
+  const addResourceHandler = useCallback(async () => {
+    setManageError('');
+    if (!newResLabel) { setManageError('Enter a resource label'); return; }
+    const res = await localApiFetch('/api/scenario', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'add_resource', label: newResLabel, total: newResTotal, type: newResType }),
+    });
+    if (!res.ok) { const d = await res.json() as any; setManageError(d?.error ?? 'Failed'); return; }
+    setNewResLabel('');
+    fetchAll();
+  }, [newResLabel, newResTotal, newResType, fetchAll]);
+
+  const removeResourceHandler = useCallback(async (id: string) => {
+    setManageError('');
+    const res = await localApiFetch('/api/scenario', { method: 'POST', body: JSON.stringify({ action: 'remove_resource', id }) });
+    if (!res.ok) { const d = await res.json() as any; setManageError(d?.error ?? 'Failed'); return; }
+    fetchAll();
+  }, [fetchAll]);
+
+  const loadPreset = useCallback(async (preset: string) => {
+    setManageError('');
+    const res = await localApiFetch('/api/scenario', { method: 'POST', body: JSON.stringify({ action: 'load_preset', preset }) });
+    if (!res.ok) { const d = await res.json() as any; setManageError(d?.error ?? 'Failed'); return; }
+    fetchAll();
+  }, [fetchAll]);
+
+  const applySpeedAndThreshold = useCallback(async () => {
+    await localApiFetch('/api/simulation', { method: 'POST', body: JSON.stringify({ tickIntervalMs: speedMs, starvationThreshold: starvThreshold }) });
+    fetchAll();
+  }, [speedMs, starvThreshold, fetchAll]);
+
+  const exportScenarioHandler = useCallback(async () => {
+    const res = await localApiFetch('/api/scenario');
+    if (res.ok) {
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'safesched-scenario.json';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    }
   }, []);
+
+  const importScenarioHandler = useCallback(async (file: File) => {
+    setManageError('');
+    try {
+      const text = await file.text();
+      const scenario = JSON.parse(text);
+      const res = await localApiFetch('/api/scenario', { method: 'POST', body: JSON.stringify({ action: 'import', scenario }) });
+      if (!res.ok) { const d = await res.json() as any; setManageError(d?.error ?? 'Import failed'); return; }
+      fetchAll();
+    } catch { setManageError('Invalid JSON file'); }
+  }, [fetchAll]);
 
   // ── Derived values ───────────────────────────────────────────────────────────
   const isDeadlocked = (sim?.deadlockedPids?.length ?? 0) > 0;
   const isSafe = sim?.bankersResult?.safe ?? true;
   const systemStatus = isDeadlocked ? 'DEADLOCK' : isSafe ? 'SAFE' : 'UNSAFE';
 
-  // ── Tour Overlay ─────────────────────────────────────────────────────────────
-  const tourData = TOUR_STEPS[tourStep];
-
   return (
-    <div className="min-h-screen bg-[#e0e5ec] pb-10">
+    <div className="min-h-screen bg-[#e0e5ec] pb-10" style={{ position: 'relative' }}>
 
-      {/* ── Tour Overlay ── */}
-      {showTour && tourData && (
-        <div className="tour-overlay">
-          <div className="tour-card">
-            <div className="text-center mb-4">
-              <span style={{ fontSize: 64, lineHeight: 1 }}>{tourData.emoji}</span>
-            </div>
-            <h2 className="text-2xl font-bold text-slate-800 text-center mb-3">{tourData.title}</h2>
-            <p className="text-slate-600 text-center text-base leading-relaxed mb-6">{tourData.desc}</p>
-
-            {/* Step dots */}
-            <div className="flex justify-center gap-2 mb-6">
-              {TOUR_STEPS.map((_, i) => (
-                <span
-                  key={i}
-                  className="tour-step-dot"
-                  style={{ background: i === tourStep ? '#2563eb' : '#cbd5e1', width: 8, height: 8 }}
-                />
-              ))}
-            </div>
-
-            {/* Buttons */}
-            <div className="flex items-center justify-between gap-3">
-              <button
-                className="skeuo-button text-sm px-4 py-2"
-                onClick={() => setTourStep(s => Math.max(0, s - 1))}
-                disabled={tourStep === 0}
-                style={{ opacity: tourStep === 0 ? 0.4 : 1 }}
-              >
-                ← Back
-              </button>
-              <button
-                className="text-slate-400 text-sm hover:text-slate-600 transition-colors"
-                onClick={skipTour}
-              >
-                Skip tour
-              </button>
-              {tourStep < TOUR_STEPS.length - 1 ? (
-                <button
-                  className="skeuo-button text-sm px-4 py-2 text-blue-600"
-                  onClick={() => setTourStep(s => s + 1)}
-                >
-                  Next →
-                </button>
-              ) : (
-                <button
-                  className="skeuo-button text-sm px-5 py-2 text-blue-600 font-bold"
-                  onClick={completeTour}
-                >
-                  Let's Go! 🚀
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
+      {/* ── Inline Tour Tooltip ── */}
+      {showTour && TOUR_STEPS[tourStep] && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.18)', zIndex: 9998, pointerEvents: 'none' }} />
+          <TourTooltip
+            step={TOUR_STEPS[tourStep]}
+            total={TOUR_STEPS.length}
+            stepIdx={tourStep}
+            onNext={() => setTourStep(s => Math.min(TOUR_STEPS.length - 1, s + 1))}
+            onPrev={() => setTourStep(s => Math.max(0, s - 1))}
+            onClose={completeTour}
+          />
+        </>
       )}
 
       {/* ── Header ── */}
-      <header className="sticky top-0 z-50 glass-card rounded-b-2xl px-6 py-3 flex flex-wrap items-center gap-3 mb-6">
+      <header data-tour="header" className="sticky top-0 z-50 glass-card rounded-b-2xl px-6 py-3 flex flex-wrap items-center gap-3 mb-6">
         {/* Logo */}
         <div className="flex items-center gap-2 mr-2">
           <span className="text-2xl">🛡</span>
@@ -530,7 +673,7 @@ export default function Dashboard() {
       <div className="max-w-7xl mx-auto px-4">
 
         {/* ── Tab Nav ── */}
-        <nav className="skeuo-pressed rounded-2xl p-1.5 flex gap-1 mb-6 overflow-x-auto">
+        <nav data-tour="tabnav" className="skeuo-pressed rounded-2xl p-1.5 flex gap-1 mb-6 overflow-x-auto">
           {(
             [
               { key: 'overview', label: '📊 Overview' },
@@ -539,6 +682,7 @@ export default function Dashboard() {
               { key: 'recovery', label: '🛡 Recovery' },
               { key: 'replay',   label: '🔁 Replay' },
               { key: 'learn',    label: '📚 Learn' },
+              { key: 'manage',   label: '⚙️ Manage' },
             ] as const
           ).map(tab => (
             <button
@@ -593,6 +737,31 @@ export default function Dashboard() {
                   <div className="text-2xl font-bold text-indigo-600">{analytics?.throughput ?? 0}</div>
                   <div className="text-xs text-slate-500 mt-0.5">Throughput</div>
                 </div>
+                {/* ── Novelty: Live Deadlock Risk Score ── */}
+                {(() => {
+                  const risk = (analytics as any)?.deadlockRiskScore ?? 0;
+                  const riskColor = risk > 70 ? '#ef4444' : risk > 40 ? '#f59e0b' : '#22c55e';
+                  const riskLabel = risk > 70 ? 'HIGH' : risk > 40 ? 'MED' : 'LOW';
+                  return (
+                    <div className="skeuo-stat min-w-[90px]" style={{ position: 'relative' }}>
+                      {/* Mini arc gauge */}
+                      <svg width="48" height="28" viewBox="0 0 48 28" style={{ margin: '0 auto', display: 'block' }}>
+                        <path d="M 4 24 A 20 20 0 0 1 44 24" fill="none" stroke="#e2e8f0" strokeWidth="5" strokeLinecap="round" />
+                        <path
+                          d="M 4 24 A 20 20 0 0 1 44 24"
+                          fill="none"
+                          stroke={riskColor}
+                          strokeWidth="5"
+                          strokeLinecap="round"
+                          strokeDasharray={`${(risk / 100) * 62.8} 62.8`}
+                          style={{ transition: 'stroke-dasharray 0.6s ease, stroke 0.4s' }}
+                        />
+                      </svg>
+                      <div className="text-sm font-bold mt-0.5" style={{ color: riskColor }}>{risk}% {riskLabel}</div>
+                      <div className="text-xs text-slate-500">Risk Score</div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Quick controls */}
@@ -611,7 +780,7 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
               {/* Col 1: Processes */}
-              <div className="space-y-3">
+              <div data-tour="processes" className="space-y-3">
                 <h3 className="font-bold text-slate-600 text-sm uppercase tracking-wide px-1">
                   Processes ({sim?.processes?.length ?? 0})
                 </h3>
@@ -642,6 +811,18 @@ export default function Dashboard() {
                         <div><span className="font-semibold">Age:</span> {proc.age}</div>
                         <div><span className="font-semibold">Wait:</span> {proc.waitTicks}</div>
                       </div>
+                      {/* Contention heat badge */}
+                      {(() => {
+                        const heat = (analytics as any)?.contentionHeat?.[proc.pid] ?? 0;
+                        if (heat === 0) return null;
+                        const heatColor = heat > 10 ? '#ef4444' : heat > 5 ? '#f59e0b' : '#94a3b8';
+                        return (
+                          <div className="text-xs mb-1.5 flex items-center gap-1">
+                            <span style={{ color: heatColor }}>🔥</span>
+                            <span style={{ color: heatColor, fontWeight: 600 }}>Contention: {heat}</span>
+                          </div>
+                        );
+                      })()}
                       {/* Resource bars */}
                       {proc.allocation.map((alloc, ri) => {
                         const res = sim?.resources?.[ri];
@@ -669,7 +850,7 @@ export default function Dashboard() {
               </div>
 
               {/* Col 2: Resources */}
-              <div className="space-y-3">
+              <div data-tour="resources" className="space-y-3">
                 <h3 className="font-bold text-slate-600 text-sm uppercase tracking-wide px-1">
                   Resources ({sim?.resources?.length ?? 0})
                 </h3>
@@ -727,7 +908,7 @@ export default function Dashboard() {
               {/* Col 3: Inject + Policy */}
               <div className="space-y-4">
                 {/* Inject form */}
-                <div className="glass-card rounded-2xl p-5">
+                <div data-tour="inject" className="glass-card rounded-2xl p-5">
                   <h3 className="font-bold text-slate-700 mb-3 flex items-center gap-2">
                     <span>💉</span> Inject Request
                   </h3>
@@ -1345,6 +1526,285 @@ export default function Dashboard() {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════════
+            MANAGE TAB — Add/Remove Processes & Resources, Presets, Speed
+        ══════════════════════════════════════════════════════════════════ */}
+        {activeTab === 'manage' && (
+          <div className="fade-in space-y-5">
+
+            {/* ── Scenario Presets ── */}
+            <div className="glass-card rounded-2xl p-5">
+              <h2 className="text-base font-bold text-slate-700 mb-1 flex items-center gap-2">
+                🎭 Scenario Presets
+              </h2>
+              <p className="text-slate-500 text-xs mb-4">
+                Load a classic textbook scenario instantly. This replaces the current simulation.
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { key: 'classic_deadlock',     icon: '🔴', label: 'Classic Deadlock',       desc: '2 processes, circular wait' },
+                  { key: 'safe_state',            icon: '✅', label: 'Safe State',             desc: 'Silberschatz textbook (5P, 3R)' },
+                  { key: 'starvation',            icon: '⏳', label: 'Starvation',             desc: 'Low-priority processes starved' },
+                  { key: 'dining_philosophers',   icon: '🍽', label: 'Dining Philosophers',    desc: '5 philosophers, 5 forks' },
+                ].map(p => (
+                  <button
+                    key={p.key}
+                    onClick={() => loadPreset(p.key)}
+                    className="skeuo-flat rounded-2xl p-4 text-left card-hover"
+                  >
+                    <div className="text-2xl mb-1">{p.icon}</div>
+                    <div className="font-bold text-slate-700 text-sm">{p.label}</div>
+                    <div className="text-xs text-slate-500 mt-0.5">{p.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Export / Import ── */}
+            <div className="glass-card rounded-2xl p-5">
+              <h2 className="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">
+                📁 Export / Import Scenario
+              </h2>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={exportScenarioHandler}
+                  className="skeuo-button text-sm text-blue-600 px-5 py-2"
+                >
+                  ⬇ Export as JSON
+                </button>
+                <label className="skeuo-button text-sm text-indigo-600 px-5 py-2 cursor-pointer">
+                  ⬆ Import JSON
+                  <input
+                    type="file" accept=".json" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) importScenarioHandler(f); }}
+                  />
+                </label>
+              </div>
+            </div>
+
+            {/* ── Simulation Speed & Starvation Threshold ── */}
+            <div className="glass-card rounded-2xl p-5">
+              <h2 className="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">
+                ⚡ Simulation Settings
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 mb-1 block">
+                    Tick Speed
+                    <span className="text-slate-400 font-normal ml-1">({speedMs}ms per tick)</span>
+                  </label>
+                  <div className="flex gap-2 flex-wrap">
+                    {[
+                      { label: '🐇 Fast', ms: 300 },
+                      { label: '🚶 Normal', ms: 1000 },
+                      { label: '🐢 Slow', ms: 2500 },
+                    ].map(s => (
+                      <button
+                        key={s.ms}
+                        onClick={() => setSpeedMs(s.ms)}
+                        className={`skeuo-button text-xs px-3 py-1.5 ${speedMs === s.ms ? 'text-blue-600' : 'text-slate-500'}`}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                    <input
+                      type="number" min={100} max={5000} step={100}
+                      value={speedMs}
+                      onChange={e => setSpeedMs(Number(e.target.value))}
+                      className="skeuo-input w-24 text-sm"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 mb-1 block">
+                    Starvation Threshold
+                    <span className="text-slate-400 font-normal ml-1">(ticks before BLOCKED)</span>
+                  </label>
+                  <input
+                    type="number" min={5} max={100}
+                    value={starvThreshold}
+                    onChange={e => setStarvThreshold(Number(e.target.value))}
+                    className="skeuo-input text-sm"
+                  />
+                </div>
+              </div>
+              <button onClick={applySpeedAndThreshold} className="skeuo-button text-sm text-indigo-600 px-5 py-2">
+                Apply Settings
+              </button>
+            </div>
+
+            {/* ── Add / Remove Processes ── */}
+            <div className="glass-card rounded-2xl p-5">
+              <h2 className="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">
+                ⚙️ Processes
+                <span className="text-xs font-normal text-slate-400">({sim?.processes?.length ?? 0} active)</span>
+              </h2>
+
+              {/* Existing processes */}
+              <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
+                {(sim?.processes ?? []).map(p => (
+                  <div key={p.pid} className="skeuo-pressed rounded-xl px-4 py-2 flex items-center gap-3">
+                    <span className={statusDotClass(p.status)} />
+                    <span className="font-bold text-slate-700 w-10">{p.pid}</span>
+                    <span className="text-xs text-slate-500 flex-1">
+                      alloc [{p.allocation.join(',')}] · max [{p.max.join(',')}] · pri {p.priority}
+                      {p.burstTime != null && ` · burst ${p.remainingTime}/${p.burstTime}`}
+                    </span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                      p.status === 'RUNNING' ? 'bg-green-100 text-green-700' :
+                      p.status === 'BLOCKED' ? 'bg-red-100 text-red-700' :
+                      p.status === 'WAITING' ? 'bg-amber-100 text-amber-700' :
+                      'bg-slate-100 text-slate-500'
+                    }`}>{statusLabel(p.status)}</span>
+                    <button
+                      onClick={() => removeProcessHandler(p.pid)}
+                      className="text-red-400 hover:text-red-600 text-sm font-bold transition-colors"
+                      title={`Remove ${p.pid}`}
+                    >✕</button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Add new process */}
+              <div className="skeuo-pressed rounded-xl p-4 space-y-3">
+                <div className="text-xs font-bold text-slate-600 uppercase tracking-wide">Add New Process</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">PID (optional)</label>
+                    <input
+                      className="skeuo-input text-sm"
+                      value={newProcPid}
+                      onChange={e => setNewProcPid(e.target.value)}
+                      placeholder="auto"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs text-slate-500 mb-1 block">
+                      Max demand per resource
+                      <span className="text-slate-400 ml-1">(comma-separated, e.g. 3,2)</span>
+                    </label>
+                    <input
+                      className="skeuo-input text-sm"
+                      value={newProcMax}
+                      onChange={e => setNewProcMax(e.target.value)}
+                      placeholder={`e.g. ${(sim?.resources ?? []).map(() => '2').join(',')}`}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">Priority</label>
+                    <input
+                      type="number" min={0} max={10}
+                      className="skeuo-input text-sm"
+                      value={newProcPriority}
+                      onChange={e => setNewProcPriority(Number(e.target.value))}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">Burst Time (ticks)</label>
+                    <input
+                      type="number" min={1} max={50}
+                      className="skeuo-input text-sm"
+                      value={newProcBurst}
+                      onChange={e => setNewProcBurst(Number(e.target.value))}
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <button onClick={addProcessHandler} className="skeuo-button w-full text-sm text-blue-600 py-2">
+                      + Add Process
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Add / Remove Resources ── */}
+            <div className="glass-card rounded-2xl p-5">
+              <h2 className="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">
+                📦 Resources
+                <span className="text-xs font-normal text-slate-400">({sim?.resources?.length ?? 0} defined)</span>
+              </h2>
+
+              {/* Existing resources */}
+              <div className="space-y-2 mb-4">
+                {(sim?.resources ?? []).map(r => {
+                  const used = r.total - r.available;
+                  const pct = Math.round((used / Math.max(r.total, 1)) * 100);
+                  return (
+                    <div key={r.id} className="skeuo-pressed rounded-xl px-4 py-2 flex items-center gap-3">
+                      <span className="text-lg">{resourceIcon(r.type)}</span>
+                      <span className="font-bold text-slate-700 w-16">{r.label}</span>
+                      <span className="text-xs text-slate-500 flex-1">
+                        {r.id} · {used}/{r.total} used · {pct}%
+                      </span>
+                      <div className="w-20 h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                        <div className="h-full rounded-full bar-fill" style={{ width: `${pct}%`, background: barColor(pct) }} />
+                      </div>
+                      <button
+                        onClick={() => removeResourceHandler(r.id)}
+                        className="text-red-400 hover:text-red-600 text-sm font-bold transition-colors"
+                        title={`Remove ${r.id}`}
+                      >✕</button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Add new resource */}
+              <div className="skeuo-pressed rounded-xl p-4 space-y-3">
+                <div className="text-xs font-bold text-slate-600 uppercase tracking-wide">Add New Resource</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="col-span-2">
+                    <label className="text-xs text-slate-500 mb-1 block">Label</label>
+                    <input
+                      className="skeuo-input text-sm"
+                      value={newResLabel}
+                      onChange={e => setNewResLabel(e.target.value)}
+                      placeholder="e.g. GPU, Disk, Lock"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">Total Units</label>
+                    <input
+                      type="number" min={1} max={100}
+                      className="skeuo-input text-sm"
+                      value={newResTotal}
+                      onChange={e => setNewResTotal(Number(e.target.value))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">Type</label>
+                    <select
+                      className="skeuo-input text-sm"
+                      value={newResType}
+                      onChange={e => setNewResType(e.target.value)}
+                    >
+                      <option value="CPU">CPU</option>
+                      <option value="MEMORY">Memory</option>
+                      <option value="IO">IO</option>
+                      <option value="NETWORK">Network</option>
+                      <option value="GENERIC">Generic</option>
+                    </select>
+                  </div>
+                </div>
+                <button onClick={addResourceHandler} className="skeuo-button text-sm text-blue-600 px-5 py-2">
+                  + Add Resource
+                </button>
+              </div>
+            </div>
+
+            {/* Error display */}
+            {manageError && (
+              <div className="glass-card rounded-2xl p-4 border border-red-200 bg-red-50/60">
+                <span className="text-red-600 text-sm font-semibold">⚠ {manageError}</span>
+                <button onClick={() => setManageError('')} className="ml-3 text-red-400 text-xs">dismiss</button>
+              </div>
+            )}
+
           </div>
         )}
 

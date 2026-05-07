@@ -59,7 +59,7 @@ export async function localApiFetch<T = any>(
       return createResponse(200, await analyticsRoute.GET() as T);
     }
 
-    // ── Scenario ──
+    // ── Scenario (full CRUD + presets + import/export) ──
     if (basePath === '/api/scenario' && method === 'GET') {
       return createResponse(200, await scenarioRoute.GET() as T);
     }

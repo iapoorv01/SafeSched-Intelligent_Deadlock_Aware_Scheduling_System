@@ -5,7 +5,7 @@ export async function GET() {
   if (sim.isPlaying) {
     const now = Date.now();
     const elapsed = Math.max(0, now - sim.lastTickAt);
-    const ticks = Math.floor(elapsed / 1000);
+    const ticks = Math.floor(elapsed / sim.tickIntervalMs);
     if (ticks > 0) {
       for (let i = 0; i < ticks; i++) applyTick();
       sim.lastTickAt = now;
@@ -16,6 +16,8 @@ export async function GET() {
     isPlaying: sim.isPlaying,
     policy: sim.policy,
     rrQuantum: sim.rrQuantum,
+    tickIntervalMs: sim.tickIntervalMs,
+    starvationThreshold: sim.starvationThreshold,
     currentPid: sim.currentPid,
     deadlockedPids: sim.deadlockedPids,
     wfgCycles: sim.wfgCycles,
@@ -29,9 +31,11 @@ export async function POST(body: {
   action?: 'play' | 'pause' | 'step' | 'reset';
   policy?: SchedulerPolicy;
   rrQuantum?: number;
+  tickIntervalMs?: number;
+  starvationThreshold?: number;
 }) {
   const sim = store.simulation;
-  const { action, policy, rrQuantum } = body;
+  const { action, policy, rrQuantum, tickIntervalMs, starvationThreshold } = body;
 
   if (policy) {
     sim.policy = policy;
@@ -40,6 +44,14 @@ export async function POST(body: {
   if (rrQuantum && rrQuantum > 0) {
     sim.rrQuantum = rrQuantum;
     addEvent('SYSTEM', 'info', `RR quantum set to ${rrQuantum}`);
+  }
+  if (tickIntervalMs && tickIntervalMs > 0) {
+    sim.tickIntervalMs = tickIntervalMs;
+    addEvent('SYSTEM', 'info', `Tick speed set to ${tickIntervalMs}ms`);
+  }
+  if (starvationThreshold && starvationThreshold > 0) {
+    sim.starvationThreshold = starvationThreshold;
+    addEvent('SYSTEM', 'info', `Starvation threshold set to ${starvationThreshold} ticks`);
   }
 
   switch (action) {
@@ -60,7 +72,7 @@ export async function POST(body: {
       resetStore();
       break;
     default:
-      if (!policy && !rrQuantum) throw new Error('Invalid action');
+      if (!policy && !rrQuantum && !tickIntervalMs && !starvationThreshold) throw new Error('Invalid action');
   }
 
   return {
@@ -68,6 +80,8 @@ export async function POST(body: {
     isPlaying: sim.isPlaying,
     policy: sim.policy,
     rrQuantum: sim.rrQuantum,
+    tickIntervalMs: sim.tickIntervalMs,
+    starvationThreshold: sim.starvationThreshold,
     currentPid: sim.currentPid,
     deadlockedPids: sim.deadlockedPids,
     wfgCycles: sim.wfgCycles,
